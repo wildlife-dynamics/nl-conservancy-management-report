@@ -165,3 +165,18 @@ cython_debug/
 .tmp
 .DS_Store
 .claude
+.scratch/
+
+# Word lock files
+~$*.docx
+
+# The Word template is a BUILD ARTEFACT of dev/build_report_template.py.
+# The workflow fetches it from the Drive URL pinned in spec.yaml at run time,
+# never from here -- a committed copy would be a second source of truth that
+# silently disagrees with Drive. Build it, upload it, verify with
+# dev/check_template_sync.py. resources/images/ IS committed: the logos are
+# source assets the builder embeds.
+resources/templates/
+
+# ruff writes this next to the shimmed binary
+.ruff_cache/

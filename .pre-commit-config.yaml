@@ -1,3 +1,10 @@
+# Generated output is excluded from every hook.
+# ecoscope-workflows-*-workflow/ is emitted by wt-compiler, and CI's
+# _recompile.yml recompiles it and diffs byte for byte -- so any hook that
+# rewrites those files breaks the build. end-of-file-fixer strips the
+# trailing newline from dags/__init__.py and CI fails on a one-line diff.
+exclude: '^ecoscope-workflows-[^/]+-workflow/'
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
