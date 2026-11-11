@@ -1,0 +1,35 @@
+name: Guard main PRs
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, edited]
+
+jobs:
+  check-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read published flag from pixi.toml
+        id: published
+        run: |
+          PUBLISHED=$(python3 -c "import tomllib; print(str(tomllib.load(open('pixi.toml','rb')).get('tool',{}).get('wt',{}).get('published', False)).lower())")
+          echo "value=$PUBLISHED" >> "$GITHUB_OUTPUT"
+          echo "tool.wt.published = $PUBLISHED"
+
+      - name: Verify PR source is staging or patch-*
+        if: steps.published.outputs.value == 'true'
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          if [[ "$HEAD_REF" == "staging" ]] || [[ "$HEAD_REF" == patch-* ]]; then
+            echo "PR source '$HEAD_REF' is allowed."
+          else
+            echo "::error::Repo is published — PRs to main must come from 'staging' or 'patch-*'. Got: '$HEAD_REF'"
+            exit 1
+          fi
+
+      - name: Unpublished mode — any source allowed
+        if: steps.published.outputs.value != 'true'
+        run: echo "tool.wt.published is not true — allowing PRs to main from any branch."
