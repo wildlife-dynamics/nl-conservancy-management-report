@@ -1,0 +1,76 @@
+[workspace]
+name = "nl-conservancy-management-report"
+channels = ['https://repo.prefix.dev/ecoscope-workflows/', 'conda-forge']
+platforms = ['linux-64', 'osx-arm64', 'win-64']
+
+[tool.wt]
+# When true, PRs to `main` must come from `staging` or `patch-*` (enforced by
+# .github/workflows/guard-main-prs.yml). Set to false for repos that have not
+# cut a release yet to allow PRs directly to `main`.
+published = false
+
+[dependencies]
+# required for compilation
+wt-compiler = ">=0.8.0, <0.9.0"
+graphviz = "*"
+
+# required for testing
+go-yq = "*"
+
+# WORKAROUND 1 of 3 for wt-compiler 0.8.3 packaging bugs. All three are ported
+# verbatim from nl-hwc-report, where each was reproduced; see
+# dev/shims/sitecustomize.py and the task comments below for the full
+# write-ups. Delete all three together when wt-compiler is fixed.
+#
+#   wt_compiler/formatting.py runs [sys.executable, "-m", "ruff", "format"],
+#   so ruff must be importable AS A MODULE. The conda recipe declares
+#   `ruff >=0.1.0`, which conda-forge satisfies with a BINARY-ONLY package --
+#   bin/ruff and three shell completions, no python module. Every compile then
+#   dies with `No module named ruff`. `[pypi-dependencies] ruff = "*"` does not
+#   fix it: pixi's conda-pypi name mapping treats the conda package as
+#   providing the PyPI name, so it keeps the binary and never fetches the
+#   wheel. The shim below puts a one-file `ruff` package on PYTHONPATH whose
+#   __main__.py execs the binary already in the env.
+#
+# The same PYTHONPATH entry also carries sitecustomize.py, workaround 3:
+# wt-compiler writes VERSION.yaml to a "wb" stream using a ruamel YAML(typ=
+# "safe") handle, which selects the C emitter whenever ruamel.yaml.clib is
+# installed -- and conda always installs it. The C emitter cannot write to a
+# binary stream, giving `a bytes-like object is required, not 'str'` and a
+# 0-byte VERSION.yaml. sitecustomize defaults `pure=True` on every YAML().
+[activation.env]
+PYTHONPATH = "$PIXI_PROJECT_ROOT/dev/shims"
+
+[tasks]
+# WORKAROUND 2 of 3. pixi does not run conda post-link scripts
+# (`run-post-link-scripts = false` by default). graphviz ships its plugins as
+# shared libraries and relies on its post-link script to build the plugin
+# registry; skip it and lib/graphviz/config6 never exists, so dot knows no
+# output formats and wt-compiler dies writing graph.png with
+# `Format: "png" not recognized. No formats found.`
+#
+# `dot -c` is idempotent and takes milliseconds, so every task depends on it
+# rather than asking anyone to remember. Narrower than pixi's own suggestion
+# (`pixi config set --local run-post-link-scripts insecure`), which would also
+# run the gdk-pixbuf and gtk3 post-link scripts.
+register-graphviz-plugins = "dot -c"
+
+# --pkg-name-prefix and --results-env-var are FLEET-INVARIANT: without them the
+# generated package defaults to upstream's `wt` prefix and `WT_RESULTS`, so CI's
+# _recompile.yml fails with "Generated directory does not exist" after a local
+# compile that looked fine.
+#
+# compile-install: first compile, or any time the inner lockfile has to be
+# created from scratch. Use this for ANYTHING you intend to run -- a compile
+# without --install or --update DROPS the inner pixi.lock, and Desktop resolves
+# the inner env from that lock when it imports the template, so without it the
+# workflow will not load for a local test at all.
+compile-install = { cmd = "wt-compiler compile --spec spec.yaml --pkg-name-prefix=ecoscope-workflows --results-env-var=ECOSCOPE_WORKFLOWS_RESULTS --clobber --no-progress --install", depends-on = ["register-graphviz-plugins"] }
+
+# SYNTAX CHECK ONLY -- no run afterwards. See the note above about the lock.
+compile = { cmd = "wt-compiler compile --spec spec.yaml --pkg-name-prefix=ecoscope-workflows --results-env-var=ECOSCOPE_WORKFLOWS_RESULTS --clobber --no-progress", depends-on = ["register-graphviz-plugins"] }
+
+# Mirrors .github/workflows/_recompile.yml. Use before opening a PR.
+recompile = { cmd = "wt-compiler compile --spec spec.yaml --pkg-name-prefix=ecoscope-workflows --results-env-var=ECOSCOPE_WORKFLOWS_RESULTS --clobber --update --no-progress", depends-on = ["register-graphviz-plugins"] }
+
+test = { cmd = "bash dev/run-test-cases.sh", depends-on = ["register-graphviz-plugins"] }
