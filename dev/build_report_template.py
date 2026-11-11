@@ -98,8 +98,19 @@ def about(text: str) -> None:
     para(text, size=9, color=GREY)
 
 
-def caption(label: str, title: str, *, center: bool = False):
-    """'Table 3. Title' / 'Fig. 2. Title' -- bold label, plain title."""
+def caption(label: str, title: str, *, center: bool = False, below: bool = False):
+    """'Table 3. Title' / 'Fig. 2. Title' -- bold label, plain title.
+
+    `below=True` is for figure captions, which sit UNDER their figure.
+
+    THE ANCHORING BUG, carried over from the HWC report's review: every caption
+    used to set keep_with_next, which binds a paragraph to the one that FOLLOWS
+    it. On a table caption that is right -- it keeps the caption with its
+    table. On a figure caption it is exactly wrong: it bound the caption to the
+    next heading and let Word break the page between the figure and its own
+    caption. A figure caption needs no keep_with_next of its own, and the
+    figure above it carries one instead.
+    """
     p = doc.add_paragraph()
     if center:
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -109,9 +120,9 @@ def caption(label: str, title: str, *, center: bool = False):
     t = p.add_run(title)
     t.italic = True
     t.font.size = Pt(9)
-    p.paragraph_format.space_before = Pt(8)
-    p.paragraph_format.space_after = Pt(4)
-    p.paragraph_format.keep_with_next = True
+    p.paragraph_format.space_before = Pt(2 if below else 8)
+    p.paragraph_format.space_after = Pt(12 if below else 4)
+    p.paragraph_format.keep_with_next = not below
     return p
 
 
@@ -153,21 +164,45 @@ def table(key: str, title: str) -> None:
 
 
 def images(key: str, title: str) -> None:
-    """A grouped image item: one figure per month, each with its own caption."""
+    """A grouped image item: one figure per group, each with its own caption.
+
+    SUB-NUMBERED, and it has to be. This renders once per group, so a single
+    'Fig. 5.' would be printed on every month's copy of the same chart and the
+    numbering would not identify anything. `{slot}.{{ loop.index }}` gives
+    Fig. 5.1, Fig. 5.2 and so on, with the group's own label (the month) in the
+    caption text beside it.
+
+    The slot number is fixed at build time and the sub-number comes from
+    docxtpl's loop, so the numbering survives the grouping being a form field
+    now: one view gives 5.1, twelve views give 5.1 to 5.12.
+    """
     global _fig_no
     _fig_no += 1
     para(f"{{%p for item in {key} %}}")
-    para("{{ item.image }}", center=True)
-    caption("", f"{title}, {{{{ item.title|e }}}}", center=True)
+    img = para("{{ item.image }}", center=True)
+    img.paragraph_format.keep_with_next = True
+    img.paragraph_format.space_after = Pt(0)
+    caption(
+        f"Fig. {_fig_no}.{{{{ loop.index }}}}",
+        f"{title}, {{{{ item.title|e }}}}",
+        center=True,
+        below=True,
+    )
     para("{%p endfor %}")
 
 
 def single_image(key: str, title: str) -> None:
-    """An UNGROUPED image item: create_docx passes one InlineImage, not a list."""
+    """An UNGROUPED image item: create_docx passes one InlineImage, not a list.
+
+    Only the month-on-month charts qualify -- they span the whole range by
+    design and are built from the indexed frame, not the grouped one.
+    """
     global _fig_no
     _fig_no += 1
-    para(f"{{{{ {key} }}}}", center=True)
-    caption("", title, center=True)
+    img = para(f"{{{{ {key} }}}}", center=True)
+    img.paragraph_format.keep_with_next = True
+    img.paragraph_format.space_after = Pt(0)
+    caption(f"Fig. {_fig_no}.", title, center=True, below=True)
 
 
 # ---------------------------------------------------------------- footer
@@ -355,6 +390,37 @@ about(
     "'OK' means none were found."
 )
 table("completeness", "Data completeness checks by month")
+
+# ---------------------------------------------------------------- notes
+# Carried over from the HWC report's review: "Where values are 'Not recorded'
+# - is this due to legacy records not being carried over properly? I think we
+# should add a footnote on this." Stated as what the data model shows rather
+# than as a diagnosis, because the obvious reading of a column full of
+# "Not recorded" is that something was lost on the way in.
+doc.add_heading("About the figures in this report", level=2)
+about(
+    "'Not recorded' means the field was left blank on the report, not that "
+    "something was investigated and came back unknown. It appears for two "
+    "reasons. Reports made before October 2026 were recorded on earlier forms "
+    "that had no equivalent field, so there was nothing to carry across when "
+    "they were migrated to the current event types. Reports made since are on "
+    "the current forms, where these fields are optional and are sometimes "
+    "skipped. Neither case means a record was lost: the event itself, its date "
+    "and its location are intact, and it is counted in every total."
+)
+about(
+    "'No Patrol Info' in the patrol tables is different again: the patrol was "
+    "recorded but no Patrol Info form was filed against it, so its mandate, "
+    "transport and station are unknown rather than blank. The data "
+    "completeness table counts these."
+)
+about(
+    "Figures are numbered in the order they appear. Where a figure is drawn "
+    "once per period in the report's grouping, each one carries a sub-number "
+    "(Fig. 5.1, Fig. 5.2) and names its period in the caption. A figure with "
+    "no data is shown as an empty panel rather than removed, so the numbering "
+    "is stable from one month's report to the next."
+)
 
 OUT.parent.mkdir(parents=True, exist_ok=True)
 doc.save(OUT)
