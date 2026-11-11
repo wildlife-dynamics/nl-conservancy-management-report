@@ -29,6 +29,13 @@ base:
       description: "Field monitoring events and patrol effort"
     prepared_by:
       var: "Ecoscope"
+    # The period grouping is a FORM FIELD now, not pinned on set_groupers, so
+    # every case has to state it. rjsf-overrides defaults the run form to this
+    # same value, so an untouched form and these cases agree. Set it to [] to
+    # exercise the single whole-period view the field also allows.
+    groupers:
+      groupers:
+        - temporal_index: '%Y-%m'
     er_client_name:
       data_source:
         name: "naibunga"
@@ -65,6 +72,13 @@ empty:
       description: "Empty period"
     prepared_by:
       var: "Ecoscope"
+    # The period grouping is a FORM FIELD now, not pinned on set_groupers, so
+    # every case has to state it. rjsf-overrides defaults the run form to this
+    # same value, so an untouched form and these cases agree. Set it to [] to
+    # exercise the single whole-period view the field also allows.
+    groupers:
+      groupers:
+        - temporal_index: '%Y-%m'
     er_client_name:
       data_source:
         name: "naibunga"

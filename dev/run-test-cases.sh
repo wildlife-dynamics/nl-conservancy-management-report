@@ -111,6 +111,28 @@ workflow_dash=$(basename "$workflow_dir" | sed 's/^ecoscope-workflows-//; s/-wor
 manifest_path="${workflow_dir}/pixi.toml"
 test_cases_file="${repo_root}/test-cases.yaml"
 
+# `pixi run --locked` fails with the unhelpful "lock file not up-to-date with
+# the workspace" when the inner pixi.lock is MISSING, not just stale -- which
+# is exactly the state `pixi run compile` leaves behind. --clobber wipes the
+# generated package, and plain `compile` has no --update, so it writes no lock.
+# `pixi run recompile` does, which is why that is the documented step.
+if [ "$local_mode" = false ] && [ "$frozen" = false ] && [ "$update" = false ] \
+   && [ ! -f "${workflow_dir}/pixi.lock" ]; then
+    echo "ERROR: ${workflow_dir}/pixi.lock is missing."
+    echo
+    echo "  'pixi run compile' clobbers the generated package and writes no"
+    echo "  lock file, so 'pixi run --locked' below has nothing to check"
+    echo "  against and reports 'lock file not up-to-date with the workspace'."
+    echo
+    echo "  Fix it with the task that does lock:"
+    echo "      pixi run recompile"
+    echo "      printf '{MAJ: 0, MIN: 2, PATCH: 0}\\n' > ${workflow_dir}/VERSION.yaml"
+    echo
+    echo "  recompile resets VERSION.yaml to 0.0.0, which validate-spec"
+    echo "  rejects, so set it afterwards -- never before."
+    exit 1
+fi
+
 if [ "$local_mode" = true ]; then
     mode_str="local (no pixi run)"
 else

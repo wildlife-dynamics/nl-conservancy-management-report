@@ -120,6 +120,74 @@ def main() -> int:
                     )
                 widget_titles[key] = tid
 
+        # 5b. every widget task needs an EXPLICIT skipif.
+        #
+        # task-instance-defaults sets [any_is_empty_df, any_dependency_skipped].
+        # Inherit that on a *_widget_single_view and, on an empty period, the
+        # widget itself skips and returns a SkipSentinel. That object goes into
+        # gather_dashboard's widget list and the run dies at the very end with
+        #     Unable to serialize unknown type: <class 'wt_task.skip.SkipSentinel'>
+        # which names no task and points at dispatch.py, so it is genuinely
+        # hard to trace back here. A widget must run and emit null data
+        # instead -- that is what a placeholder is.
+        if "_widget_single_view" in t_task and "skipif" not in t:
+            problems.append(
+                f"{path} ({tid}): widget has no explicit skipif, so it inherits "
+                f"the empty-df default and will return a SkipSentinel on an "
+                f"empty period"
+            )
+
+        # 5c. the three things validate_sql_query rejects outright.
+        #
+        # All cheap here and all slow to find otherwise: the length one only
+        # surfaces after the fixtures are rebuilt and the whole query chain has
+        # run. Comments count toward the 10,000, so a long explanatory block
+        # inside the SQL is what pushes a query over -- put those in a YAML
+        # comment above the task instead, which does not count.
+        if t_task == "apply_sql_query":
+            q = (t.get("partial") or {}).get("query")
+            if isinstance(q, str):
+                if not q.lstrip().upper().startswith("SELECT"):
+                    problems.append(
+                        f"{path} ({tid}): query does not start with SELECT "
+                        f"(a leading `--` comment block does this)"
+                    )
+                if ";" in q:
+                    line = next(
+                        (i for i, ln in enumerate(q.split("\n"), 1) if ";" in ln), 0
+                    )
+                    problems.append(
+                        f"{path} ({tid}): query contains ';' on line {line} -- "
+                        f"rejected anywhere in the text, INCLUDING inside a "
+                        f"`--` comment"
+                    )
+                if len(q) > 10_000:
+                    problems.append(
+                        f"{path} ({tid}): query is {len(q)} characters, over the "
+                        f"10,000 limit. Comments count."
+                    )
+                elif len(q) > 9_500:
+                    problems.append(
+                        f"{path} ({tid}): query is {len(q)} characters, within "
+                        f"{10_000 - len(q)} of the 10,000 limit"
+                    )
+
+        # 5d. `barmode` inside a layout style does NOTHING.
+        #
+        # draw_bar_chart's layout_kwargs and draw_pie_chart's layout_style are
+        # LayoutStyle pydantic models with a closed field list, and pydantic
+        # drops unknown keys SILENTLY. Stacking is an argument of draw_chart,
+        # not a layout key -- a chart that needs to stack has to use that task,
+        # with its data in long format.
+        for style_key in ("layout_kwargs", "layout_style"):
+            style = (t.get("partial") or {}).get(style_key)
+            if isinstance(style, dict) and "barmode" in style:
+                problems.append(
+                    f"{path} ({tid}): `barmode` in {style_key} is dropped "
+                    f"silently by pydantic and the chart renders grouped. Use "
+                    f"the `draw_chart` task instead."
+                )
+
     # 6. every ${{ workflow.X.return }} must name a task that exists.
     refs = set(re.findall(r"workflow\.([A-Za-z0-9_]+)\.return", raw))
     for missing in sorted(refs - ids):

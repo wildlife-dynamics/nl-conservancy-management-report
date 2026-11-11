@@ -11,6 +11,37 @@ requirements:
   channel: conda-forge
 rjsf-overrides:
   properties:
+    # `set_string_var`'s only argument is `var`, declared with `Field(title="")`,
+    # so the run form had nothing to label it with and fell back to the argument
+    # name.
+    prepared_by.properties.var.title: Prepared by
+    prepared_by.properties.var.description: >-
+      Type in the name of the user preparing the analysis - this will appear in
+      the report.
+    # THE PERIOD GROUPING IS A FORM FIELD, NOT A PINNED CONSTANT.
+    #
+    # Review: "please can you add the temporal grouper to the config instead of
+    # having it encoded within the workflow". It used to be
+    # `partial: {groupers: [{temporal_index: '%Y-%m'}]}` on set_groupers, which
+    # hard-wired one view per calendar month and gave the run form nothing to
+    # set.
+    #
+    # Constrained to TemporalGrouper, the same way incidents_reports constrains
+    # its own field to ValueGrouper. Without this the field offers Value and
+    # Spatial groupers too, and either one would split on a column this
+    # workflow never builds -- a run-time failure on a choice the form invited.
+    #
+    # The default keeps month-by-month as the out-of-box behaviour, so an
+    # untouched form produces exactly the report that was there before.
+    groupers.properties.groupers.title: Report period grouping
+    groupers.properties.groupers.description: >-
+      How the report is broken down. Year and Month gives one view per calendar
+      month, which is what a monthly management report expects. Leave empty for
+      a single view covering the whole time range.
+    groupers.properties.groupers.default:
+    - temporal_index: '%Y-%m'
+    groupers.properties.groupers.items.anyOf:
+    - $ref: '#/$defs/TemporalGrouper'
     base_map_defs.properties.base_maps.default:
     - url: https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}
       opacity: 1
@@ -53,12 +84,19 @@ workflow:
 - name: Base Maps
   id: base_map_defs
   task: set_base_maps
-- name: Group by Month
+# UNPINNED on review, so the grouping comes from the run form. The default and
+# the restriction to temporal groupers are in rjsf-overrides at the top of this
+# file.
+#
+# Nothing downstream needed changing. Every task that groups already reads
+# `${{ workflow.groupers.return }}` rather than assuming a month, the
+# month-on-month charts derive their month in SQL from the event time rather
+# than from the grouping, and the Word template loops over grouped values, so
+# one view or twelve both render. An empty selection gives the AllGrouper and a
+# single whole-period view.
+- name: Group by
   id: groupers
   task: set_groupers
-  partial:
-    groupers:
-    - temporal_index: '%Y-%m'
 - title: Fetch Events
   type: task-group
   description: All events in the period; sections select their event types in SQL.
@@ -748,7 +786,12 @@ workflow:
         placement: top-left
       legend_style:
         placement: bottom-right
-      max_zoom: 20
+      # Review feedback on the HWC report, applied here too: at 20 the
+      # auto-fitted view state zooms past the level the ArcGIS basemaps
+      # serve tiles for over rural Laikipia, and a map with one or two
+      # points fits to exactly that and renders grey. 15 is inside tile
+      # coverage everywhere and still shows individual bomas.
+      max_zoom: 15
     mapvalues:
       argnames: geo_layers
       argvalues: ${{ workflow.patrol_layer.return }}
@@ -1016,7 +1059,9 @@ workflow:
       color_column: null
       plot_style:
         textinfo: value+percent
-      layout_style: null
+      layout_style:
+        showlegend: true
+        legend_title: Event type
     mapvalues:
       argnames: dataframe
       argvalues: ${{ workflow.event_type_counts.return }}
@@ -1179,7 +1224,12 @@ workflow:
         placement: top-left
       legend_style:
         placement: bottom-right
-      max_zoom: 20
+      # Review feedback on the HWC report, applied here too: at 20 the
+      # auto-fitted view state zooms past the level the ArcGIS basemaps
+      # serve tiles for over rural Laikipia, and a map with one or two
+      # points fits to exactly that and renders grey. 15 is inside tile
+      # coverage everywhere and still shows individual bomas.
+      max_zoom: 15
     mapvalues:
       argnames: geo_layers
       argvalues: ${{ workflow.wildlife_layer.return }}
@@ -1397,7 +1447,12 @@ workflow:
         placement: top-left
       legend_style:
         placement: bottom-right
-      max_zoom: 20
+      # Review feedback on the HWC report, applied here too: at 20 the
+      # auto-fitted view state zooms past the level the ArcGIS basemaps
+      # serve tiles for over rural Laikipia, and a map with one or two
+      # points fits to exactly that and renders grey. 15 is inside tile
+      # coverage everywhere and still shows individual bomas.
+      max_zoom: 15
     mapvalues:
       argnames: geo_layers
       argvalues: ${{ workflow.ah_layer.return }}
@@ -1528,59 +1583,66 @@ workflow:
     task: apply_sql_query
     partial:
       query: |
-        SELECT cause AS "Cause of death",
-               SUM(type = 'Poached') AS "Poached",
-               SUM(type = 'Conflict') AS "Conflict",
-               SUM(type = 'Natural') AS "Natural",
-               SUM(type = 'PAC/Management') AS "PAC/Management",
-               SUM(type = 'Unknown') AS "Unknown"
+        SELECT g."Cause of death" AS "Cause of death",
+               ty."Type of death" AS "Type of death",
+               COALESCE(SUM(CASE WHEN c.cause IS NULL THEN 0
+                                 WHEN c.type = ty."Type of death" THEN 1
+                                 ELSE 0 END), 0) AS "Carcasses"
         FROM (
-          SELECT COALESCE(wl_cause, 'Not recorded') AS cause, COALESCE(death_type, 'Unknown') AS type
+          SELECT COALESCE(wl_cause, 'Not recorded') AS "Cause of death"
           FROM df WHERE event_type = 'animal_carcass' AND animal_h = 'Elephant'
-        ) AS c
-        GROUP BY cause ORDER BY cause
+          GROUP BY 1
+        ) g
+        CROSS JOIN (
+                    SELECT 'Conflict' AS "Type of death"
+          UNION ALL SELECT 'Natural'
+          UNION ALL SELECT 'PAC/Management'
+          UNION ALL SELECT 'Poached'
+          UNION ALL SELECT 'Unknown'
+        ) ty
+        LEFT JOIN (
+          SELECT COALESCE(wl_cause, 'Not recorded') AS cause,
+                 COALESCE(death_type, 'Unknown') AS type
+          FROM df WHERE event_type = 'animal_carcass' AND animal_h = 'Elephant'
+        ) c ON c.cause = g."Cause of death"
+        GROUP BY 1, 2 ORDER BY 1, 2
       columns: null
       sanitize: true
     mapvalues:
       argnames: df
       argvalues: ${{ workflow.events_grouped.return }}
+  # STACKED, via draw_chart.
+  #
+  # draw_bar_chart CANNOT stack: it builds go.Figure(layout=LayoutStyle), and
+  # LayoutStyle has no barmode field, so pydantic drops any `barmode` handed to
+  # layout_kwargs without a word and the chart renders grouped. draw_chart
+  # takes barmode as a real argument, which is why the query above now emits
+  # one row per (cause, type of death) instead of a column per type.
+  #
+  # The scaffold matters for colour as much as for completeness: draw_chart
+  # cycles `palette` over the series in sorted order with no way to key it by
+  # label, so a period with no Poached carcasses would otherwise hand Poached's
+  # indigo to the next series along.
   - name: Draw Elephant Cause and Type of Death Bar Chart
     id: mike_bar
-    task: draw_bar_chart
+    task: draw_chart
     partial:
-      category: Cause of death
-      bar_chart_configs:
-      - label: Poached
-        column: Poached
-        agg_func: sum
-        show_label: true
-        style:
-          marker_color: '#3e35a3'
-      - label: Conflict
-        column: Conflict
-        agg_func: sum
-        show_label: true
-        style:
-          marker_color: '#b62879'
-      - label: Natural
-        column: Natural
-        agg_func: sum
-        show_label: true
-        style:
-          marker_color: '#ff803e'
-      - label: PAC/Management
-        column: PAC/Management
-        agg_func: sum
-        show_label: true
-        style:
-          marker_color: '#ed3ea2'
-      - label: Unknown
-        column: Unknown
-        agg_func: sum
-        show_label: true
-        style:
-          marker_color: '#3089ff'
-      layout_kwargs: null
+      x_axis: Cause of death
+      figures:
+      - metric: {display_name: Carcasses, aggregator: sum, column: Carcasses, decimal_places: 0}
+        chart_type: bar
+      time_interval: null
+      category: Type of death
+      time_breakdown: null
+      barmode: stack
+      # Sorted: Conflict, Natural, PAC/Management, Poached, Unknown.
+      palette: ['#b62879', '#ff803e', '#ed3ea2', '#3e35a3', '#3089ff']
+      plot_style: null
+      layout_style:
+        showlegend: true
+        legend_title: Type of death
+        xaxis: {title: Cause of death}
+        yaxis: {title: Elephant carcasses}
     mapvalues:
       argnames: dataframe
       argvalues: ${{ workflow.mike_by_cause.return }}
@@ -1672,7 +1734,12 @@ workflow:
         placement: top-left
       legend_style:
         placement: bottom-right
-      max_zoom: 20
+      # Review feedback on the HWC report, applied here too: at 20 the
+      # auto-fitted view state zooms past the level the ArcGIS basemaps
+      # serve tiles for over rural Laikipia, and a map with one or two
+      # points fits to exactly that and renders grey. 15 is inside tile
+      # coverage everywhere and still shows individual bomas.
+      max_zoom: 15
     mapvalues:
       argnames: geo_layers
       argvalues: ${{ workflow.mike_layer.return }}
@@ -1785,7 +1852,9 @@ workflow:
       color_column: null
       plot_style:
         textinfo: value+percent
-      layout_style: null
+      layout_style:
+        showlegend: true
+        legend_title: Event type
     mapvalues:
       argnames: dataframe
       argvalues: ${{ workflow.security_counts.return }}
@@ -2075,56 +2144,67 @@ workflow:
     task: apply_sql_query
     partial:
       query: |
-        SELECT species_h AS "Species responsible",
-               SUM(event_type = 'hwc_livestock_predation') AS "Livestock predation",
-               SUM(event_type = 'crop_damage') AS "Crop damage",
-               SUM(event_type = 'infrastructure_damage') AS "Infrastructure damage",
-               SUM(event_type = 'human_injury') AS "Human injury",
-               SUM(event_type = 'human_death') AS "Human death"
-        FROM df WHERE is_conflict = 1 AND event_type IN ('hwc_livestock_predation', 'crop_damage', 'infrastructure_damage', 'human_injury', 'human_death')
-        GROUP BY 1 ORDER BY COUNT(*) DESC
+        SELECT sp."Species responsible" AS "Species responsible",
+               ty."Event type" AS "Event type",
+               COALESCE(cnt.n, 0) AS "Events"
+        FROM (
+          SELECT species_h AS "Species responsible", COUNT(*) AS total
+          FROM df WHERE is_conflict = 1
+            AND event_type IN ('hwc_livestock_predation', 'crop_damage',
+                               'infrastructure_damage', 'human_injury', 'human_death')
+          GROUP BY 1
+        ) sp
+        CROSS JOIN (
+                    SELECT 'Crop damage' AS "Event type"
+          UNION ALL SELECT 'Human death'
+          UNION ALL SELECT 'Human injury'
+          UNION ALL SELECT 'Infrastructure damage'
+          UNION ALL SELECT 'Livestock predation'
+        ) ty
+        LEFT JOIN (
+          SELECT species_h AS sp_name,
+                 CASE event_type
+                   WHEN 'hwc_livestock_predation' THEN 'Livestock predation'
+                   WHEN 'crop_damage'             THEN 'Crop damage'
+                   WHEN 'infrastructure_damage'   THEN 'Infrastructure damage'
+                   WHEN 'human_injury'            THEN 'Human injury'
+                   WHEN 'human_death'             THEN 'Human death'
+                 END AS et,
+                 COUNT(*) AS n
+          FROM df WHERE is_conflict = 1
+            AND event_type IN ('hwc_livestock_predation', 'crop_damage',
+                               'infrastructure_damage', 'human_injury', 'human_death')
+          GROUP BY 1, 2
+        ) cnt ON cnt.sp_name = sp."Species responsible" AND cnt.et = ty."Event type"
+        ORDER BY sp.total DESC, 1, 2
       columns: null
       sanitize: true
     mapvalues:
       argnames: df
       argvalues: ${{ workflow.events_grouped.return }}
+  # STACKED, and using the same five conflict-type colours as the HWC report,
+  # so a reader moving between the two documents sees crop damage in the same
+  # pink. Sorted order is Crop damage, Human death, Human injury,
+  # Infrastructure damage, Livestock predation.
   - name: Draw HWC by Species and Event Type Bar Chart
     id: hwc_bar
-    task: draw_bar_chart
+    task: draw_chart
     partial:
-      category: Species responsible
-      bar_chart_configs:
-      - label: Livestock predation
-        column: Livestock predation
-        agg_func: sum
-        show_label: true
-        style:
-          marker_color: '#3e35a3'
-      - label: Crop damage
-        column: Crop damage
-        agg_func: sum
-        show_label: true
-        style:
-          marker_color: '#b62879'
-      - label: Infrastructure damage
-        column: Infrastructure damage
-        agg_func: sum
-        show_label: true
-        style:
-          marker_color: '#ff803e'
-      - label: Human injury
-        column: Human injury
-        agg_func: sum
-        show_label: true
-        style:
-          marker_color: '#ed3ea2'
-      - label: Human death
-        column: Human death
-        agg_func: sum
-        show_label: true
-        style:
-          marker_color: '#3089ff'
-      layout_kwargs: null
+      x_axis: Species responsible
+      figures:
+      - metric: {display_name: Events, aggregator: sum, column: Events, decimal_places: 0}
+        chart_type: bar
+      time_interval: null
+      category: Event type
+      time_breakdown: null
+      barmode: stack
+      palette: ['#b62879', '#8c1700', '#ed3ea2', '#ff803e', '#3e35a3']
+      plot_style: null
+      layout_style:
+        showlegend: true
+        legend_title: Event type
+        xaxis: {title: Species responsible}
+        yaxis: {title: Conflict events}
     mapvalues:
       argnames: dataframe
       argvalues: ${{ workflow.hwc_by_species.return }}
@@ -2214,7 +2294,12 @@ workflow:
         placement: top-left
       legend_style:
         placement: bottom-right
-      max_zoom: 20
+      # Review feedback on the HWC report, applied here too: at 20 the
+      # auto-fitted view state zooms past the level the ArcGIS basemaps
+      # serve tiles for over rural Laikipia, and a map with one or two
+      # points fits to exactly that and renders grey. 15 is inside tile
+      # coverage everywhere and still shows individual bomas.
+      max_zoom: 15
     mapvalues:
       argnames: geo_layers
       argvalues: ${{ workflow.hwc_layer.return }}
@@ -2487,7 +2572,12 @@ workflow:
         placement: top-left
       legend_style:
         placement: bottom-right
-      max_zoom: 20
+      # Review feedback on the HWC report, applied here too: at 20 the
+      # auto-fitted view state zooms past the level the ArcGIS basemaps
+      # serve tiles for over rural Laikipia, and a map with one or two
+      # points fits to exactly that and renders grey. 15 is inside tile
+      # coverage everywhere and still shows individual bomas.
+      max_zoom: 15
     mapvalues:
       argnames: geo_layers
       argvalues: ${{ workflow.hid_layer.return }}
@@ -2629,37 +2719,85 @@ workflow:
   type: task-group
   description: Trend charts across the whole time range.
   tasks:
+  # EVERY MONTH IN THE PERIOD, INCLUDING THE EMPTY ONES.
+  #
+  # Review feedback on the HWC report: "Stacked bar time axis must include
+  # every month in the period, including zero months." The same defect is here.
+  # draw_time_series_bar_chart buckets whatever rows it is given, so a month
+  # with no counted events simply had no bucket and vanished from the axis,
+  # making a gap in reporting look like a gap in time.
+  #
+  # The frame is now built the other way round: every month CROSS JOINed with
+  # every category, counts LEFT JOINed on, so an empty month keeps a
+  # zero-height bar and its slot.
+  #
+  # The month list spans MIN to MAX of report_time over EVERY event fetched for
+  # the period, counted or not, so a month holding only patrol logistics still
+  # appears. It is a proxy for the configured range rather than the range
+  # itself: apply_sql_query sees only the dataframe, and nothing carries
+  # since/until into SQL.
+  #
+  # `s` is a counter, and the only way to get one: the validator requires the
+  # query to start with SELECT, so WITH RECURSIVE is out, and df is the single
+  # readable table. It yields one integer per row of df, so the axis can span
+  # at most as many months as the period has events.
   - name: Events per Month
     id: events_trend_df
     task: apply_sql_query
     partial:
       df: ${{ workflow.events_indexed.return }}
       query: |
-        SELECT id, event_category, report_time FROM df WHERE counted = 1
+        SELECT mon."Month" AS "Month",
+               cat."Category" AS "Category",
+               COALESCE(cnt.n, 0) AS "Events"
+        FROM (
+          SELECT substr('000' || CAST((b.lo + s.n) / 12 AS TEXT), -4, 4) || '-' ||
+                 substr('0' || CAST(((b.lo + s.n) % 12) + 1 AS TEXT), -2, 2) AS "Month"
+          FROM (
+            SELECT MIN(CAST(substr(report_time, 1, 4) AS INTEGER) * 12
+                       + CAST(substr(report_time, 6, 2) AS INTEGER) - 1) AS lo,
+                   MAX(CAST(substr(report_time, 1, 4) AS INTEGER) * 12
+                       + CAST(substr(report_time, 6, 2) AS INTEGER) - 1) AS hi
+            FROM df WHERE report_time IS NOT NULL
+          ) b
+          JOIN (SELECT ROW_NUMBER() OVER () - 1 AS n FROM df LIMIT 1200) s
+            ON b.lo + s.n <= b.hi
+        ) mon
+        CROSS JOIN (
+          SELECT DISTINCT event_category AS "Category" FROM df WHERE counted = 1
+        ) cat
+        LEFT JOIN (
+          SELECT strftime('%Y-%m', report_time) AS mth,
+                 event_category AS cg, COUNT(*) AS n
+          FROM df WHERE counted = 1 GROUP BY 1, 2
+        ) cnt ON cnt.mth = mon."Month" AND cnt.cg = cat."Category"
+        ORDER BY 1, 2
       columns: null
       sanitize: true
-  - name: Parse Trend Time
-    id: events_trend_time
-    task: extract_column_as_type
-    partial:
-      df: ${{ workflow.events_trend_df.return }}
-      column_name: report_time
-      output_type: datetime
-      output_column_name: report_time
-      fan_out: true
+  # draw_chart, not draw_time_series_bar_chart: "Month" is already a 'YYYY-MM'
+  # string, so time_interval stays null and the x axis is categorical. Asking
+  # draw_chart to bucket by month instead would re-derive the axis from the
+  # data and drop the padded months again.
   - name: Draw Events per Month
     id: events_trend
-    task: draw_time_series_bar_chart
+    task: draw_chart
     partial:
-      dataframe: ${{ workflow.events_trend_time.return }}
-      x_axis: report_time
-      y_axis: id
-      category: event_category
-      agg_function: count
-      time_interval: month
-      color_column: null
+      dataframe: ${{ workflow.events_trend_df.return }}
+      x_axis: Month
+      figures:
+      - metric: {display_name: Events, aggregator: sum, column: Events, decimal_places: 0}
+        chart_type: bar
+      time_interval: null
+      category: Category
+      time_breakdown: null
+      barmode: stack
+      palette: viridis
       plot_style: null
-      layout_style: null
+      layout_style:
+        showlegend: true
+        legend_title: Event category
+        xaxis: {title: Month}
+        yaxis: {title: Events recorded}
   - name: Persist Events per Month
     id: events_trend_html
     task: persist_text
@@ -2675,19 +2813,61 @@ workflow:
     partial:
       title: Events per Month by Category
       data: ${{ workflow.events_trend_html.return }}
+  # Same month scaffold as the events chart above, for the same reason: a month
+  # in which no patrol went out has to hold its slot on the axis rather than
+  # disappear. Distance is SUMmed rather than counted, so the padded rows carry
+  # a zero distance and contribute nothing to the total.
+  - name: Patrol Distance per Month
+    id: patrol_trend_df
+    task: apply_sql_query
+    partial:
+      df: ${{ workflow.patrols_indexed.return }}
+      query: |
+        SELECT mon."Month" AS "Month",
+               ty."Patrol type" AS "Patrol type",
+               COALESCE(d.km, 0) AS "Distance"
+        FROM (
+          SELECT substr('000' || CAST((b.lo + s.n) / 12 AS TEXT), -4, 4) || '-' ||
+                 substr('0' || CAST(((b.lo + s.n) % 12) + 1 AS TEXT), -2, 2) AS "Month"
+          FROM (
+            SELECT MIN(CAST(substr(start_time, 1, 4) AS INTEGER) * 12
+                       + CAST(substr(start_time, 6, 2) AS INTEGER) - 1) AS lo,
+                   MAX(CAST(substr(start_time, 1, 4) AS INTEGER) * 12
+                       + CAST(substr(start_time, 6, 2) AS INTEGER) - 1) AS hi
+            FROM df WHERE start_time IS NOT NULL
+          ) b
+          JOIN (SELECT ROW_NUMBER() OVER () - 1 AS n FROM df LIMIT 1200) s
+            ON b.lo + s.n <= b.hi
+        ) mon
+        CROSS JOIN (SELECT DISTINCT patrol_type AS "Patrol type" FROM df) ty
+        LEFT JOIN (
+          SELECT strftime('%Y-%m', start_time) AS mth, patrol_type AS pt,
+                 ROUND(SUM(COALESCE(distance_km, 0)), 2) AS km
+          FROM df GROUP BY 1, 2
+        ) d ON d.mth = mon."Month" AND d.pt = ty."Patrol type"
+        ORDER BY 1, 2
+      columns: null
+      sanitize: true
   - name: Draw Patrol Distance per Month
     id: patrol_trend
-    task: draw_time_series_bar_chart
+    task: draw_chart
     partial:
-      dataframe: ${{ workflow.patrols_indexed.return }}
-      x_axis: start_time
-      y_axis: distance_km
-      category: patrol_type
-      agg_function: sum
-      time_interval: month
-      color_column: null
+      dataframe: ${{ workflow.patrol_trend_df.return }}
+      x_axis: Month
+      figures:
+      - metric: {display_name: Distance, aggregator: sum, column: Distance, decimal_places: 1}
+        chart_type: bar
+      time_interval: null
+      category: Patrol type
+      time_breakdown: null
+      barmode: stack
+      palette: viridis
       plot_style: null
-      layout_style: null
+      layout_style:
+        showlegend: true
+        legend_title: Patrol type
+        xaxis: {title: Month}
+        yaxis: {title: Distance travelled (km)}
   - name: Persist Patrol Distance per Month
     id: patrol_trend_html
     task: persist_text
@@ -2789,10 +2969,14 @@ workflow:
     template_path: https://drive.google.com/uc?export=download&id=1MjrrRVMdUmxPpUNgQOYJRFONm0bYKrZF   # pinned: not shown in the run form
     context:
       items:
+      # '%d %b %Y', not '%B %Y'. Carried over from the HWC report's review:
+      # month names alone printed "January - November" for a period ending on
+      # the 11th, which reads as a full November. This prints the configured
+      # dates, and matches the time_format already set on set_time_range.
       - item_type: timerange
         key: report_date
         value: ${{ workflow.time_range.return }}
-        format: '%B %Y'
+        format: '%d %b %Y'
       - item_type: text
         key: prepared_by
         value: ${{ workflow.prepared_by.return }}
@@ -2991,6 +3175,135 @@ workflow:
     filename_prefix: naibunga_lower_management_report
     skip: false
     missing_text: No data for this period.
+- title: Downloadable Results
+  type: task-group
+  description: The CSVs and the Word report, listed in the app's Files tab.
+  tasks:
+  # WHY THE FILES TAB WAS EMPTY
+  #
+  # Review: "The workflow has run successfully but there are no downloadable
+  # files." Nothing here registered one. persist_text writes the widget HTML
+  # and create_docx writes the report, but the Files tab is NOT a directory
+  # listing -- it is built from the `files` argument of gather_dashboard, and
+  # that argument was absent entirely. So every output existed on disk and the
+  # app correctly reported none. Same omission the HWC report had.
+  #
+  # The chain, per the fleet's download pattern:
+  #   persist_grouped_dfs_for_results_download  (writes, returns paths)
+  #     -> create_files_single_view             (paths -> a view)
+  #       -> merge_file_views                   (views -> GroupedFiles)
+  #         -> gather_dashboard(files=...)
+  #
+  # persist_grouped_dfs_for_results_download rather than persist_df_wrapper:
+  # it embeds a 6-char hash of the group key in each filename, which is how the
+  # front end matches a file to a dashboard view -- so with the month grouper
+  # each month's CSV is offered against that month's view. Its return is a FLAT
+  # list of paths across all groups, so it feeds one ungrouped view.
+  #
+  # Column whitelists, not blacklists, in both queries below. No name, ID
+  # number, telephone, date of birth, ethnicity or tribe is selected, so none
+  # can reach a file a user downloads and forwards, even if a form adds one of
+  # those fields later. Team leader is the documented exception -- crediting
+  # rangers is the point of the patrol record, and the user guide says so.
+  - name: Event Export
+    id: events_export
+    task: apply_sql_query
+    partial:
+      query: |
+        SELECT serial_number AS "Serial",
+               substr(report_time, 1, 16) AS "Date",
+               event_category AS "Category",
+               event_type_display AS "Event type",
+               species_h AS "Species",
+               animal_h AS "Animal",
+               death_type AS "Type of death",
+               wl_cause AS "Cause",
+               conflict_type AS "Conflict type",
+               COALESCE(action_txt, '') AS "Action taken",
+               geometry AS "Location"
+        FROM df WHERE counted = 1
+        ORDER BY report_time
+      columns: null
+      sanitize: true
+    mapvalues:
+      argnames: df
+      argvalues: ${{ workflow.events_grouped.return }}
+  - name: Patrol Export
+    id: patrols_export
+    task: apply_sql_query
+    partial:
+      query: |
+        SELECT patrol_serial AS "Serial",
+               substr(start_time, 1, 16) AS "Start",
+               patrol_type AS "Patrol type",
+               ROUND(distance_km, 2) AS "Distance (km)",
+               ROUND(duration_h, 2) AS "Duration (h)",
+               mandate AS "Mandate",
+               transport AS "Transport",
+               station AS "Station",
+               team_leader AS "Team leader"
+        FROM df
+        ORDER BY start_time
+      columns: null
+      sanitize: true
+    mapvalues:
+      argnames: df
+      argvalues: ${{ workflow.patrols_grouped.return }}
+
+  # skipif *never* on every task from here down. These must run even on an
+  # empty period: a skipped task returns a SkipSentinel, that object reaches
+  # gather_dashboard, and the whole run then dies at response serialization
+  # with "Unable to serialize unknown type: SkipSentinel" -- an error that
+  # names no task and points at dispatch.py.
+  - name: Write Event CSV
+    id: export_event_files
+    task: persist_grouped_dfs_for_results_download
+    skipif:
+      conditions: &never [never]
+    partial:
+      grouped_dfs: ${{ workflow.events_export.return }}
+      root_path: ${{ env.ECOSCOPE_WORKFLOWS_RESULTS }}
+      filetypes: [csv]
+      filename_prefix: naibunga_events
+      sanitize: true
+  - name: Write Patrol CSV
+    id: export_patrol_files
+    task: persist_grouped_dfs_for_results_download
+    skipif:
+      conditions: *never
+    partial:
+      grouped_dfs: ${{ workflow.patrols_export.return }}
+      root_path: ${{ env.ECOSCOPE_WORKFLOWS_RESULTS }}
+      filetypes: [csv]
+      filename_prefix: naibunga_patrols
+      sanitize: true
+  - {name: Event CSV Files, id: files_events_view, task: create_files_single_view,
+     skipif: {conditions: *never},
+     partial: {files: "${{ workflow.export_event_files.return }}"}}
+  - {name: Patrol CSV Files, id: files_patrols_view, task: create_files_single_view,
+     skipif: {conditions: *never},
+     partial: {files: "${{ workflow.export_patrol_files.return }}"}}
+  - {name: Word Report File, id: files_report_view, task: create_files_single_view,
+     skipif: {conditions: *never},
+     partial: {files: "${{ workflow.create_report.return }}"}}
+  # The per-chart HTML files are deliberately NOT here. They come from grouped
+  # `persist_text` tasks, which return [(CompositeFilter, path)] rather than a
+  # path. Consuming that with `map` gives a LIST of FilesListSingleView per
+  # chart, and merge_file_views takes list[FilesListSingleView], not a list of
+  # lists. Nothing in ecoscope-platform or ext-custom flattens a grouped return
+  # into a plain list of paths. Doing it properly needs an upstream task; until
+  # then the charts and maps are in the results folder but not the Files tab.
+  - name: Merge File Views
+    id: files_merged
+    task: merge_file_views
+    skipif:
+      conditions: *never
+    partial:
+      files:
+      - ${{ workflow.files_events_view.return }}
+      - ${{ workflow.files_patrols_view.return }}
+      - ${{ workflow.files_report_view.return }}
+
 - name: Create Dashboard
   id: dashboard
   task: gather_dashboard
@@ -3039,3 +3352,7 @@ workflow:
     - ${{ workflow.patrol_trend_w.return }}
     groupers: ${{ workflow.groupers.return }}
     time_range: ${{ workflow.time_range.return }}
+    # What makes the Files tab non-empty. Without this the outputs exist on
+    # disk and the app says there are no downloadable results, because the tab
+    # is a manifest, not a directory listing.
+    files: ${{ workflow.files_merged.return }}

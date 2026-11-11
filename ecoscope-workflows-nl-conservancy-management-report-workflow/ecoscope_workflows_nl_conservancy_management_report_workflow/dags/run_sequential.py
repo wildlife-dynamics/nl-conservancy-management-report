@@ -21,6 +21,9 @@ from ecoscope.platform.tasks.io import (
 from ecoscope.platform.tasks.io import (
     get_patrols_from_combined_params as get_patrols_from_combined_params,
 )
+from ecoscope.platform.tasks.io import (
+    persist_grouped_dfs_for_results_download as persist_grouped_dfs_for_results_download,
+)
 from ecoscope.platform.tasks.io import persist_text as persist_text
 from ecoscope.platform.tasks.io import process_events_details as process_events_details
 from ecoscope.platform.tasks.io import set_er_connection as set_er_connection
@@ -29,6 +32,9 @@ from ecoscope.platform.tasks.io import (
 )
 from ecoscope.platform.tasks.preprocessing import (
     relocations_to_trajectory as relocations_to_trajectory,
+)
+from ecoscope.platform.tasks.results import (
+    create_files_single_view as create_files_single_view,
 )
 from ecoscope.platform.tasks.results import (
     create_map_widget_single_view as create_map_widget_single_view,
@@ -46,14 +52,12 @@ from ecoscope.platform.tasks.results import (
 from ecoscope.platform.tasks.results import (
     create_table_widget_single_view as create_table_widget_single_view,
 )
-from ecoscope.platform.tasks.results import draw_bar_chart as draw_bar_chart
+from ecoscope.platform.tasks.results import draw_chart as draw_chart
 from ecoscope.platform.tasks.results import draw_ecomap as draw_ecomap
 from ecoscope.platform.tasks.results import draw_pie_chart as draw_pie_chart
 from ecoscope.platform.tasks.results import draw_table as draw_table
-from ecoscope.platform.tasks.results import (
-    draw_time_series_bar_chart as draw_time_series_bar_chart,
-)
 from ecoscope.platform.tasks.results import gather_dashboard as gather_dashboard
+from ecoscope.platform.tasks.results import merge_file_views as merge_file_views
 from ecoscope.platform.tasks.results import merge_widget_views as merge_widget_views
 from ecoscope.platform.tasks.results import set_base_maps as set_base_maps
 from ecoscope.platform.tasks.skip import all_geometry_are_none as all_geometry_are_none
@@ -215,9 +219,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             ],
             unpack_depth=1,
         )
-        .partial(
-            groupers=[{"temporal_index": "%Y-%m"}], **(params.get("groupers") or {})
-        )
+        .partial(**(params.get("groupers") or {}))
         .call()
     )
 
@@ -1276,7 +1278,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             title=None,
             north_arrow_style={"placement": "top-left"},
             legend_style={"placement": "bottom-right"},
-            max_zoom=20,
+            max_zoom=15,
             **(params.get("patrol_map") or {}),
         )
         .mapvalues(argnames=["geo_layers"], argvalues=patrol_layer)
@@ -1760,7 +1762,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             label_column="Event type",
             color_column=None,
             plot_style={"textinfo": "value+percent"},
-            layout_style=None,
+            layout_style={"showlegend": True, "legend_title": "Event type"},
             **(params.get("event_type_pie") or {}),
         )
         .mapvalues(argnames=["dataframe"], argvalues=event_type_counts)
@@ -2030,7 +2032,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             title=None,
             north_arrow_style={"placement": "top-left"},
             legend_style={"placement": "bottom-right"},
-            max_zoom=20,
+            max_zoom=15,
             **(params.get("wildlife_map") or {}),
         )
         .mapvalues(argnames=["geo_layers"], argvalues=wildlife_layer)
@@ -2429,7 +2431,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             title=None,
             north_arrow_style={"placement": "top-left"},
             legend_style={"placement": "bottom-right"},
-            max_zoom=20,
+            max_zoom=15,
             **(params.get("ah_map") or {}),
         )
         .mapvalues(argnames=["geo_layers"], argvalues=ah_layer)
@@ -2689,7 +2691,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             unpack_depth=1,
         )
         .partial(
-            query="SELECT cause AS \"Cause of death\",\n       SUM(type = 'Poached') AS \"Poached\",\n       SUM(type = 'Conflict') AS \"Conflict\",\n       SUM(type = 'Natural') AS \"Natural\",\n       SUM(type = 'PAC/Management') AS \"PAC/Management\",\n       SUM(type = 'Unknown') AS \"Unknown\"\nFROM (\n  SELECT COALESCE(wl_cause, 'Not recorded') AS cause, COALESCE(death_type, 'Unknown') AS type\n  FROM df WHERE event_type = 'animal_carcass' AND animal_h = 'Elephant'\n) AS c\nGROUP BY cause ORDER BY cause\n",
+            query="SELECT g.\"Cause of death\" AS \"Cause of death\",\n       ty.\"Type of death\" AS \"Type of death\",\n       COALESCE(SUM(CASE WHEN c.cause IS NULL THEN 0\n                         WHEN c.type = ty.\"Type of death\" THEN 1\n                         ELSE 0 END), 0) AS \"Carcasses\"\nFROM (\n  SELECT COALESCE(wl_cause, 'Not recorded') AS \"Cause of death\"\n  FROM df WHERE event_type = 'animal_carcass' AND animal_h = 'Elephant'\n  GROUP BY 1\n) g\nCROSS JOIN (\n            SELECT 'Conflict' AS \"Type of death\"\n  UNION ALL SELECT 'Natural'\n  UNION ALL SELECT 'PAC/Management'\n  UNION ALL SELECT 'Poached'\n  UNION ALL SELECT 'Unknown'\n) ty\nLEFT JOIN (\n  SELECT COALESCE(wl_cause, 'Not recorded') AS cause,\n         COALESCE(death_type, 'Unknown') AS type\n  FROM df WHERE event_type = 'animal_carcass' AND animal_h = 'Elephant'\n) c ON c.cause = g.\"Cause of death\"\nGROUP BY 1, 2 ORDER BY 1, 2\n",
             columns=None,
             sanitize=True,
             **(params.get("mike_by_cause") or {}),
@@ -2698,7 +2700,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
     )
 
     mike_bar = (
-        task(draw_bar_chart)
+        task(draw_chart)
         .validate()
         .set_task_instance_id("mike_bar")
         .handle_errors()
@@ -2711,45 +2713,30 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             unpack_depth=1,
         )
         .partial(
-            category="Cause of death",
-            bar_chart_configs=[
+            x_axis="Cause of death",
+            figures=[
                 {
-                    "label": "Poached",
-                    "column": "Poached",
-                    "agg_func": "sum",
-                    "show_label": True,
-                    "style": {"marker_color": "#3e35a3"},
-                },
-                {
-                    "label": "Conflict",
-                    "column": "Conflict",
-                    "agg_func": "sum",
-                    "show_label": True,
-                    "style": {"marker_color": "#b62879"},
-                },
-                {
-                    "label": "Natural",
-                    "column": "Natural",
-                    "agg_func": "sum",
-                    "show_label": True,
-                    "style": {"marker_color": "#ff803e"},
-                },
-                {
-                    "label": "PAC/Management",
-                    "column": "PAC/Management",
-                    "agg_func": "sum",
-                    "show_label": True,
-                    "style": {"marker_color": "#ed3ea2"},
-                },
-                {
-                    "label": "Unknown",
-                    "column": "Unknown",
-                    "agg_func": "sum",
-                    "show_label": True,
-                    "style": {"marker_color": "#3089ff"},
-                },
+                    "metric": {
+                        "display_name": "Carcasses",
+                        "aggregator": "sum",
+                        "column": "Carcasses",
+                        "decimal_places": 0,
+                    },
+                    "chart_type": "bar",
+                }
             ],
-            layout_kwargs=None,
+            time_interval=None,
+            category="Type of death",
+            time_breakdown=None,
+            barmode="stack",
+            palette=["#b62879", "#ff803e", "#ed3ea2", "#3e35a3", "#3089ff"],
+            plot_style=None,
+            layout_style={
+                "showlegend": True,
+                "legend_title": "Type of death",
+                "xaxis": {"title": "Cause of death"},
+                "yaxis": {"title": "Elephant carcasses"},
+            },
             **(params.get("mike_bar") or {}),
         )
         .mapvalues(argnames=["dataframe"], argvalues=mike_by_cause)
@@ -2916,7 +2903,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             title=None,
             north_arrow_style={"placement": "top-left"},
             legend_style={"placement": "bottom-right"},
-            max_zoom=20,
+            max_zoom=15,
             **(params.get("mike_map") or {}),
         )
         .mapvalues(argnames=["geo_layers"], argvalues=mike_layer)
@@ -3121,7 +3108,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             label_column="Event type",
             color_column=None,
             plot_style={"textinfo": "value+percent"},
-            layout_style=None,
+            layout_style={"showlegend": True, "legend_title": "Event type"},
             **(params.get("security_pie") or {}),
         )
         .mapvalues(argnames=["dataframe"], argvalues=security_counts)
@@ -3651,7 +3638,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             unpack_depth=1,
         )
         .partial(
-            query="SELECT species_h AS \"Species responsible\",\n       SUM(event_type = 'hwc_livestock_predation') AS \"Livestock predation\",\n       SUM(event_type = 'crop_damage') AS \"Crop damage\",\n       SUM(event_type = 'infrastructure_damage') AS \"Infrastructure damage\",\n       SUM(event_type = 'human_injury') AS \"Human injury\",\n       SUM(event_type = 'human_death') AS \"Human death\"\nFROM df WHERE is_conflict = 1 AND event_type IN ('hwc_livestock_predation', 'crop_damage', 'infrastructure_damage', 'human_injury', 'human_death')\nGROUP BY 1 ORDER BY COUNT(*) DESC\n",
+            query="SELECT sp.\"Species responsible\" AS \"Species responsible\",\n       ty.\"Event type\" AS \"Event type\",\n       COALESCE(cnt.n, 0) AS \"Events\"\nFROM (\n  SELECT species_h AS \"Species responsible\", COUNT(*) AS total\n  FROM df WHERE is_conflict = 1\n    AND event_type IN ('hwc_livestock_predation', 'crop_damage',\n                       'infrastructure_damage', 'human_injury', 'human_death')\n  GROUP BY 1\n) sp\nCROSS JOIN (\n            SELECT 'Crop damage' AS \"Event type\"\n  UNION ALL SELECT 'Human death'\n  UNION ALL SELECT 'Human injury'\n  UNION ALL SELECT 'Infrastructure damage'\n  UNION ALL SELECT 'Livestock predation'\n) ty\nLEFT JOIN (\n  SELECT species_h AS sp_name,\n         CASE event_type\n           WHEN 'hwc_livestock_predation' THEN 'Livestock predation'\n           WHEN 'crop_damage'             THEN 'Crop damage'\n           WHEN 'infrastructure_damage'   THEN 'Infrastructure damage'\n           WHEN 'human_injury'            THEN 'Human injury'\n           WHEN 'human_death'             THEN 'Human death'\n         END AS et,\n         COUNT(*) AS n\n  FROM df WHERE is_conflict = 1\n    AND event_type IN ('hwc_livestock_predation', 'crop_damage',\n                       'infrastructure_damage', 'human_injury', 'human_death')\n  GROUP BY 1, 2\n) cnt ON cnt.sp_name = sp.\"Species responsible\" AND cnt.et = ty.\"Event type\"\nORDER BY sp.total DESC, 1, 2\n",
             columns=None,
             sanitize=True,
             **(params.get("hwc_by_species") or {}),
@@ -3660,7 +3647,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
     )
 
     hwc_bar = (
-        task(draw_bar_chart)
+        task(draw_chart)
         .validate()
         .set_task_instance_id("hwc_bar")
         .handle_errors()
@@ -3673,45 +3660,30 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             unpack_depth=1,
         )
         .partial(
-            category="Species responsible",
-            bar_chart_configs=[
+            x_axis="Species responsible",
+            figures=[
                 {
-                    "label": "Livestock predation",
-                    "column": "Livestock predation",
-                    "agg_func": "sum",
-                    "show_label": True,
-                    "style": {"marker_color": "#3e35a3"},
-                },
-                {
-                    "label": "Crop damage",
-                    "column": "Crop damage",
-                    "agg_func": "sum",
-                    "show_label": True,
-                    "style": {"marker_color": "#b62879"},
-                },
-                {
-                    "label": "Infrastructure damage",
-                    "column": "Infrastructure damage",
-                    "agg_func": "sum",
-                    "show_label": True,
-                    "style": {"marker_color": "#ff803e"},
-                },
-                {
-                    "label": "Human injury",
-                    "column": "Human injury",
-                    "agg_func": "sum",
-                    "show_label": True,
-                    "style": {"marker_color": "#ed3ea2"},
-                },
-                {
-                    "label": "Human death",
-                    "column": "Human death",
-                    "agg_func": "sum",
-                    "show_label": True,
-                    "style": {"marker_color": "#3089ff"},
-                },
+                    "metric": {
+                        "display_name": "Events",
+                        "aggregator": "sum",
+                        "column": "Events",
+                        "decimal_places": 0,
+                    },
+                    "chart_type": "bar",
+                }
             ],
-            layout_kwargs=None,
+            time_interval=None,
+            category="Event type",
+            time_breakdown=None,
+            barmode="stack",
+            palette=["#b62879", "#8c1700", "#ed3ea2", "#ff803e", "#3e35a3"],
+            plot_style=None,
+            layout_style={
+                "showlegend": True,
+                "legend_title": "Event type",
+                "xaxis": {"title": "Species responsible"},
+                "yaxis": {"title": "Conflict events"},
+            },
             **(params.get("hwc_bar") or {}),
         )
         .mapvalues(argnames=["dataframe"], argvalues=hwc_by_species)
@@ -3878,7 +3850,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             title=None,
             north_arrow_style={"placement": "top-left"},
             legend_style={"placement": "bottom-right"},
-            max_zoom=20,
+            max_zoom=15,
             **(params.get("hwc_map") or {}),
         )
         .mapvalues(argnames=["geo_layers"], argvalues=hwc_layer)
@@ -4379,7 +4351,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             title=None,
             north_arrow_style={"placement": "top-left"},
             legend_style={"placement": "bottom-right"},
-            max_zoom=20,
+            max_zoom=15,
             **(params.get("hid_map") or {}),
         )
         .mapvalues(argnames=["geo_layers"], argvalues=hid_layer)
@@ -4641,7 +4613,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
         )
         .partial(
             df=events_indexed,
-            query="SELECT id, event_category, report_time FROM df WHERE counted = 1\n",
+            query='SELECT mon."Month" AS "Month",\n       cat."Category" AS "Category",\n       COALESCE(cnt.n, 0) AS "Events"\nFROM (\n  SELECT substr(\'000\' || CAST((b.lo + s.n) / 12 AS TEXT), -4, 4) || \'-\' ||\n         substr(\'0\' || CAST(((b.lo + s.n) % 12) + 1 AS TEXT), -2, 2) AS "Month"\n  FROM (\n    SELECT MIN(CAST(substr(report_time, 1, 4) AS INTEGER) * 12\n               + CAST(substr(report_time, 6, 2) AS INTEGER) - 1) AS lo,\n           MAX(CAST(substr(report_time, 1, 4) AS INTEGER) * 12\n               + CAST(substr(report_time, 6, 2) AS INTEGER) - 1) AS hi\n    FROM df WHERE report_time IS NOT NULL\n  ) b\n  JOIN (SELECT ROW_NUMBER() OVER () - 1 AS n FROM df LIMIT 1200) s\n    ON b.lo + s.n <= b.hi\n) mon\nCROSS JOIN (\n  SELECT DISTINCT event_category AS "Category" FROM df WHERE counted = 1\n) cat\nLEFT JOIN (\n  SELECT strftime(\'%Y-%m\', report_time) AS mth,\n         event_category AS cg, COUNT(*) AS n\n  FROM df WHERE counted = 1 GROUP BY 1, 2\n) cnt ON cnt.mth = mon."Month" AND cnt.cg = cat."Category"\nORDER BY 1, 2\n',
             columns=None,
             sanitize=True,
             **(params.get("events_trend_df") or {}),
@@ -4649,32 +4621,8 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
         .call()
     )
 
-    events_trend_time = (
-        task(extract_column_as_type)
-        .validate()
-        .set_task_instance_id("events_trend_time")
-        .handle_errors()
-        .with_tracing()
-        .skipif(
-            conditions=[
-                any_is_empty_df,
-                any_dependency_skipped,
-            ],
-            unpack_depth=1,
-        )
-        .partial(
-            df=events_trend_df,
-            column_name="report_time",
-            output_type="datetime",
-            output_column_name="report_time",
-            fan_out=True,
-            **(params.get("events_trend_time") or {}),
-        )
-        .call()
-    )
-
     events_trend = (
-        task(draw_time_series_bar_chart)
+        task(draw_chart)
         .validate()
         .set_task_instance_id("events_trend")
         .handle_errors()
@@ -4687,15 +4635,31 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             unpack_depth=1,
         )
         .partial(
-            dataframe=events_trend_time,
-            x_axis="report_time",
-            y_axis="id",
-            category="event_category",
-            agg_function="count",
-            time_interval="month",
-            color_column=None,
+            dataframe=events_trend_df,
+            x_axis="Month",
+            figures=[
+                {
+                    "metric": {
+                        "display_name": "Events",
+                        "aggregator": "sum",
+                        "column": "Events",
+                        "decimal_places": 0,
+                    },
+                    "chart_type": "bar",
+                }
+            ],
+            time_interval=None,
+            category="Category",
+            time_breakdown=None,
+            barmode="stack",
+            palette="viridis",
             plot_style=None,
-            layout_style=None,
+            layout_style={
+                "showlegend": True,
+                "legend_title": "Event category",
+                "xaxis": {"title": "Month"},
+                "yaxis": {"title": "Events recorded"},
+            },
             **(params.get("events_trend") or {}),
         )
         .call()
@@ -4743,8 +4707,31 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
         .call()
     )
 
+    patrol_trend_df = (
+        task(apply_sql_query)
+        .validate()
+        .set_task_instance_id("patrol_trend_df")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            df=patrols_indexed,
+            query='SELECT mon."Month" AS "Month",\n       ty."Patrol type" AS "Patrol type",\n       COALESCE(d.km, 0) AS "Distance"\nFROM (\n  SELECT substr(\'000\' || CAST((b.lo + s.n) / 12 AS TEXT), -4, 4) || \'-\' ||\n         substr(\'0\' || CAST(((b.lo + s.n) % 12) + 1 AS TEXT), -2, 2) AS "Month"\n  FROM (\n    SELECT MIN(CAST(substr(start_time, 1, 4) AS INTEGER) * 12\n               + CAST(substr(start_time, 6, 2) AS INTEGER) - 1) AS lo,\n           MAX(CAST(substr(start_time, 1, 4) AS INTEGER) * 12\n               + CAST(substr(start_time, 6, 2) AS INTEGER) - 1) AS hi\n    FROM df WHERE start_time IS NOT NULL\n  ) b\n  JOIN (SELECT ROW_NUMBER() OVER () - 1 AS n FROM df LIMIT 1200) s\n    ON b.lo + s.n <= b.hi\n) mon\nCROSS JOIN (SELECT DISTINCT patrol_type AS "Patrol type" FROM df) ty\nLEFT JOIN (\n  SELECT strftime(\'%Y-%m\', start_time) AS mth, patrol_type AS pt,\n         ROUND(SUM(COALESCE(distance_km, 0)), 2) AS km\n  FROM df GROUP BY 1, 2\n) d ON d.mth = mon."Month" AND d.pt = ty."Patrol type"\nORDER BY 1, 2\n',
+            columns=None,
+            sanitize=True,
+            **(params.get("patrol_trend_df") or {}),
+        )
+        .call()
+    )
+
     patrol_trend = (
-        task(draw_time_series_bar_chart)
+        task(draw_chart)
         .validate()
         .set_task_instance_id("patrol_trend")
         .handle_errors()
@@ -4757,15 +4744,31 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             unpack_depth=1,
         )
         .partial(
-            dataframe=patrols_indexed,
-            x_axis="start_time",
-            y_axis="distance_km",
-            category="patrol_type",
-            agg_function="sum",
-            time_interval="month",
-            color_column=None,
+            dataframe=patrol_trend_df,
+            x_axis="Month",
+            figures=[
+                {
+                    "metric": {
+                        "display_name": "Distance",
+                        "aggregator": "sum",
+                        "column": "Distance",
+                        "decimal_places": 1,
+                    },
+                    "chart_type": "bar",
+                }
+            ],
+            time_interval=None,
+            category="Patrol type",
+            time_breakdown=None,
+            barmode="stack",
+            palette="viridis",
             plot_style=None,
-            layout_style=None,
+            layout_style={
+                "showlegend": True,
+                "legend_title": "Patrol type",
+                "xaxis": {"title": "Month"},
+                "yaxis": {"title": "Distance travelled (km)"},
+            },
             **(params.get("patrol_trend") or {}),
         )
         .call()
@@ -4971,7 +4974,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
                         "item_type": "timerange",
                         "key": "report_date",
                         "value": time_range,
-                        "format": "%B %Y",
+                        "format": "%d %b %Y",
                     },
                     {"item_type": "text", "key": "prepared_by", "value": prepared_by},
                     {
@@ -5256,6 +5259,163 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
         .call()
     )
 
+    events_export = (
+        task(apply_sql_query)
+        .validate()
+        .set_task_instance_id("events_export")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            query='SELECT serial_number AS "Serial",\n       substr(report_time, 1, 16) AS "Date",\n       event_category AS "Category",\n       event_type_display AS "Event type",\n       species_h AS "Species",\n       animal_h AS "Animal",\n       death_type AS "Type of death",\n       wl_cause AS "Cause",\n       conflict_type AS "Conflict type",\n       COALESCE(action_txt, \'\') AS "Action taken",\n       geometry AS "Location"\nFROM df WHERE counted = 1\nORDER BY report_time\n',
+            columns=None,
+            sanitize=True,
+            **(params.get("events_export") or {}),
+        )
+        .mapvalues(argnames=["df"], argvalues=events_grouped)
+    )
+
+    patrols_export = (
+        task(apply_sql_query)
+        .validate()
+        .set_task_instance_id("patrols_export")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            query='SELECT patrol_serial AS "Serial",\n       substr(start_time, 1, 16) AS "Start",\n       patrol_type AS "Patrol type",\n       ROUND(distance_km, 2) AS "Distance (km)",\n       ROUND(duration_h, 2) AS "Duration (h)",\n       mandate AS "Mandate",\n       transport AS "Transport",\n       station AS "Station",\n       team_leader AS "Team leader"\nFROM df\nORDER BY start_time\n',
+            columns=None,
+            sanitize=True,
+            **(params.get("patrols_export") or {}),
+        )
+        .mapvalues(argnames=["df"], argvalues=patrols_grouped)
+    )
+
+    export_event_files = (
+        task(persist_grouped_dfs_for_results_download)
+        .validate()
+        .set_task_instance_id("export_event_files")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                never,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            grouped_dfs=events_export,
+            root_path=os.environ["ECOSCOPE_WORKFLOWS_RESULTS"],
+            filetypes=["csv"],
+            filename_prefix="naibunga_events",
+            sanitize=True,
+            **(params.get("export_event_files") or {}),
+        )
+        .call()
+    )
+
+    export_patrol_files = (
+        task(persist_grouped_dfs_for_results_download)
+        .validate()
+        .set_task_instance_id("export_patrol_files")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                never,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            grouped_dfs=patrols_export,
+            root_path=os.environ["ECOSCOPE_WORKFLOWS_RESULTS"],
+            filetypes=["csv"],
+            filename_prefix="naibunga_patrols",
+            sanitize=True,
+            **(params.get("export_patrol_files") or {}),
+        )
+        .call()
+    )
+
+    files_events_view = (
+        task(create_files_single_view)
+        .validate()
+        .set_task_instance_id("files_events_view")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                never,
+            ],
+            unpack_depth=1,
+        )
+        .partial(files=export_event_files, **(params.get("files_events_view") or {}))
+        .call()
+    )
+
+    files_patrols_view = (
+        task(create_files_single_view)
+        .validate()
+        .set_task_instance_id("files_patrols_view")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                never,
+            ],
+            unpack_depth=1,
+        )
+        .partial(files=export_patrol_files, **(params.get("files_patrols_view") or {}))
+        .call()
+    )
+
+    files_report_view = (
+        task(create_files_single_view)
+        .validate()
+        .set_task_instance_id("files_report_view")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                never,
+            ],
+            unpack_depth=1,
+        )
+        .partial(files=create_report, **(params.get("files_report_view") or {}))
+        .call()
+    )
+
+    files_merged = (
+        task(merge_file_views)
+        .validate()
+        .set_task_instance_id("files_merged")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                never,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            files=[files_events_view, files_patrols_view, files_report_view],
+            **(params.get("files_merged") or {}),
+        )
+        .call()
+    )
+
     dashboard = (
         task(gather_dashboard)
         .validate()
@@ -5315,6 +5475,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             ],
             groupers=groupers,
             time_range=time_range,
+            files=files_merged,
             **(params.get("dashboard") or {}),
         )
         .call()
