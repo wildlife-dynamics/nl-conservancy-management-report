@@ -1,0 +1,82 @@
+# All cases are mock-io with SYNTHETIC fixtures from
+# dev/fixtures/build_naibunga_fixtures.py (real Naibunga patrol/event data is
+# sensitive and is never committed). The events fixture serves both get_events
+# and process_events_details (both io-tagged).
+#
+# The form default for template_path is the Google Drive copy of the template.
+# `base` uses the repo copy (template_path resolves from the inner package dir);
+# `empty` uses the Drive URL so the default download path is exercised too.
+#
+# A live case (mock_io: false) is deliberately absent until the Naibunga ER
+# connection name and its event-type slugs are confirmed.
+
+base:
+  name: Base case (two months, synthetic fixtures)
+  description: >-
+    Untouched-form defaults over Oct-Nov 2026. Exercises every section, the
+    fixed month grouper (two views), the incident-date rule (an Arrest reported
+    1 Oct with an Arrest time of 30 Sep lands in a 2026-09 view), the data
+    completeness checks and the Word report with map/chart screenshots.
+  mock_io: true
+  mock_io_overrides:
+    ecoscope.platform.tasks.io.get_events: dev/fixtures/events.example-return.parquet
+    ecoscope.platform.tasks.io.process_events_details: dev/fixtures/events.example-return.parquet
+    ecoscope.platform.tasks.io.get_patrols_from_combined_params: dev/fixtures/patrols.example-return.parquet
+    ecoscope.platform.tasks.io.get_patrol_observations_from_patrols_df_and_combined_params: dev/fixtures/patrol-obs.example-return.parquet
+  params:
+    workflow_details:
+      name: "Naibunga Lower Monthly Management Report"
+      description: "Field monitoring events and patrol effort"
+    prepared_by:
+      var: "Ecoscope"
+    er_client_name:
+      data_source:
+        name: "naibunga"
+    time_range:
+      since: "2026-10-01T00:00:00"
+      until: "2026-11-30T23:59:59"
+      timezone:
+        label: "(GMT+03:00) Nairobi"
+        tzCode: "Africa/Nairobi"
+        name: "East Africa Time"
+        utc: "+03:00"
+    base_map_defs:
+      base_maps:
+        - url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"
+          opacity: 1
+        - url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+          opacity: 0.5
+
+empty:
+  name: Empty period (no patrols, no events)
+  description: >-
+    Zero-row fixtures for every io task: the skip chains must hold, every widget
+    renders as a placeholder, and the Word report still renders with
+    "No records" sections.
+  mock_io: true
+  mock_io_overrides:
+    ecoscope.platform.tasks.io.get_events: dev/fixtures/events-empty.example-return.parquet
+    ecoscope.platform.tasks.io.process_events_details: dev/fixtures/events-empty.example-return.parquet
+    ecoscope.platform.tasks.io.get_patrols_from_combined_params: dev/fixtures/patrols-empty.example-return.parquet
+    ecoscope.platform.tasks.io.get_patrol_observations_from_patrols_df_and_combined_params: dev/fixtures/patrol-obs-empty.example-return.parquet
+  params:
+    workflow_details:
+      name: "Naibunga Lower Monthly Management Report"
+      description: "Empty period"
+    prepared_by:
+      var: "Ecoscope"
+    er_client_name:
+      data_source:
+        name: "naibunga"
+    time_range:
+      since: "2026-10-01T00:00:00"
+      until: "2026-10-31T23:59:59"
+      timezone:
+        label: "(GMT+03:00) Nairobi"
+        tzCode: "Africa/Nairobi"
+        name: "East Africa Time"
+        utc: "+03:00"
+    base_map_defs:
+      base_maps:
+        - url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"
+          opacity: 1

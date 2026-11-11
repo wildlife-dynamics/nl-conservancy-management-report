@@ -1,21 +1,28 @@
-name:  # Title Case, e.g. "My Ecoscope Workflow Template"
+name: Naibunga Lower Conservancy Management Report
 
 # at least one author is required
 author:
-  - name: ""
-    organization: ""
-    email: ""
+  - name: "Rodney Omukuti"
+    organization: "Wildlife Dynamics"
+    email: "rodney@wildlifedynamics.com"
 
-description: # A short description
+description: >-
+  Monthly dashboard and Word report for Naibunga Lower Conservancy: patrol
+  effort and coverage, wildlife sightings, animal health and MIKE elephant
+  mortality, security incidents, human-wildlife conflict, human injury and
+  death, and data-completeness checks, from EarthRanger patrols and events.
 
-# todo: add example
-theory: "" # optional
+theory: >-
+  Events are bucketed by month using each event's own incident date where the
+  event type records one (Human Injury, Crop and Infrastructure damage:
+  Incident date & time; Poisoning: Date & time; Arrest: Arrest time; Contact:
+  Contact time), otherwise the EarthRanger event time. Logistics events
+  (Patrol Info, Meeting Report) and the Livestock Household Survey are
+  excluded from all event totals. PIKE is the share of elephant carcasses
+  whose Type of Death is Poached.
 
-# todo: add example
-output_comment: "" # optional
+output_comment: >-
+  One dashboard view per month in the selected period, plus a Word report
+  (one table row per month) with map and chart figures.
 
-# optional
-# example
-# citation: 
-#   - Wu, Y. et al. (2025). "Monitoring elephant spatial patterns with Ecoscope workflows."
-citation: [] 
+citation: []
