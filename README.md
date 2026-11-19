@@ -1,7 +1,7 @@
-# Naibunga Lower Monthly Management Report — User Guide
+# Naibunga Lower Conservancy Management Report — User Guide
 
-This guide walks you through running the Naibunga Lower Monthly Management
-Report, which reads patrol effort and field monitoring events from EarthRanger
+This guide walks you through running the Naibunga Lower Conservancy
+Management Report, which reads patrol effort and field monitoring events from EarthRanger
 and produces an interactive dashboard and a Word report for a period you
 choose.
 
@@ -14,11 +14,11 @@ Each run answers, for the chosen period:
 - how many carcasses and injured animals were found, of which species and cause
 - what security and illegal activity was recorded
 - what human-wildlife conflict occurred, and what it cost
-- how the month compares with the months before it
+- how each month compares with the others in the period
 
 and delivers:
 
-- **A dashboard** — 40 widgets across the ten report sections, with a **month
+- **A dashboard** — 42 widgets across the report sections, with a **month
   selector** at the top so you can step through the period a month at a time
 - **A Word report** (`naibunga_lower_management_report_<hash>.docx`) — the same
   material with headings, numbered tables and figures, ready to send or print
@@ -63,16 +63,18 @@ The template appears in **Workflow Templates** as
 
 ## Step 4 — Fill in the form
 
-Five fields, none of them long.
+Seven fields, none of them long.
 
 | Field | What it does |
 |---|---|
 | **Workflow Name** | names this run in the runner's list |
 | **Workflow Description** | optional; appears on the Word report cover |
-| **Prepared by** | the name or organisation printed on the cover |
+| **Prepared by** | the name of the person preparing the analysis, printed on the cover |
 | **Data Source** | the EarthRanger connection from Step 2 |
 | **Time Range** | timezone, **Since** and **Until**. Everything is drawn from this window, and the month-by-month breakdown comes from splitting it. |
 | **Base Maps** | the background for the maps. The defaults are fine. |
+| **Group by** | *Year and Month* (the default) gives one dashboard view per month. Leave it empty for one view over the whole period. The Word report's month-by-month tables appear either way. |
+| **Priority species** | up to five species for the proportional-symbol map (default Elephant, Lion, Wild Dog, Leopard). Use the English name as the report shows it. |
 
 The report template itself is not in the form — it is fetched automatically
 when the workflow runs.
@@ -97,17 +99,17 @@ show the whole period, because their point is the comparison across months.
 
 | # | Section | What it tells you |
 |---|---|---|
-| 1 | **Patrol effort** | Four cards: patrols, hours, kilometres, average speed. Your top-line effort numbers. |
+| 1 | **Patrol effort** | Four cards: patrols, hours, kilometres, average speed. Your top-line effort numbers. Hours are capped at 14 per patrol (see below). |
 | 2 | **Patrol coverage** | Where rangers actually went, one colour per patrol type, plus effort split by transport type and by mandate. |
 | 3 | **Patrol by ranger** | The same effort per ranger, counting team leaders and team members. |
-| 4 | **Event summary** | How many events were recorded and of what type. Patrol Info, Meeting Report and the Livestock Household Survey are excluded — they are paperwork, not field observations. |
-| 5 | **Wildlife monitoring** | Species seen, split into visual sightings, individuals counted, and signs (spoor or dung). The map sizes each point by the number of animals. |
+| 4 | **Event summary** | How many events were recorded and of what type. Patrol details reports, Meeting Report and the Livestock Household Survey are excluded — they are paperwork, not field observations. |
+| 5 | **Wildlife monitoring** | Species seen, split into visual sightings, individuals counted, signs (spoor or dung) and sightings with no type. A second map shows only your priority species, symbol area proportional to the number of animals. |
 | 6 | **Animal health** | Carcasses and sick or injured animals, by cause, with a map. |
-| 7 | **MIKE** | The elephant mortality panel: carcasses found, PIKE, and the cause and type of death. |
-| 8 | **Security** | Arrests, contacts, gunshots, poacher camps and spoor, snares, theft and recovered trophies — counts by type and a log of each incident. |
+| 7 | **MIKE** | The elephant mortality panel: carcasses found, PIKE, and a sunburst of type of death (inner ring) and cause (outer ring). |
+| 8 | **Security** | Arrests, contacts, gunshots, poacher camps and spoor, snares, theft and recovered trophies — counts by type, a map, and a log of each incident. |
 | 9 | **Human-wildlife conflict** | Incidents, people hurt, livestock lost, retaliation, by species and event type, with a map. |
 | 10 | **Human injury and death** | All causes, not just conflict: accidents and security incidents too. |
-| | **Data completeness** | How often key fields were left blank. Read this first — it tells you how much to trust everything above. |
+| | **Data completeness** | For the whole period: blank fields, patrols left open, impossible locations and possible duplicate reports. Read this first — it tells you how much to trust everything above. |
 
 ## Downloading the results
 
@@ -120,25 +122,56 @@ report, which is usually what you want to send on.
 Worth knowing before you quote a number.
 
 **Patrol effort counts completed patrols only.** A patrol still running, or
-cancelled, is not included. Distance and duration come from the GPS track, so a
-patrol with no track contributes a patrol count but no kilometres — the Data
-completeness table counts those.
+cancelled, is not included. Distance comes from the GPS track, so a patrol with
+no track contributes a patrol count but no kilometres — the Data completeness
+table counts those.
 
-**Event totals exclude paperwork.** Patrol Info, Meeting Report and the
+**Patrol time is capped at 14 hours per patrol.** Patrols that are not ended in
+EarthRanger keep running, some for days; uncapped, 61 such patrols made up most
+of the 11,563 hours recorded for Jan–Nov 2026. A patrol that overlaps the start
+or end of the period counts only the part inside it, and counts in the month it
+started (or the first month, if it started before the period).
+
+**Patrol details (team, transport, mandate, station) were first recorded on 25
+April 2026**, in a report linked to the patrol; since 18 November 2026 they are
+entered on the patrol itself, and the report reads both. Patrols before 25 April
+show *No patrol details*. Earlier records could hold several mandates, listed as
+a combination such as *Routine, Security*.
+
+**Event totals exclude paperwork.** Patrol details reports, Meeting Report and the
 Livestock Household Survey never appear in event counts or charts.
 
 **The report period uses the incident date where the form has one.** Human
 Injury, Crop damage and Infrastructure damage use *Incident date & time*;
 Poisoning uses *Date & time*; Arrest uses *Arrest time*; Contact uses *Contact
 time*. Everything else uses the EarthRanger event time. So an incident reported
-days after it happened is counted in the month it happened.
+days after it happened is counted in the month it happened — unless that date
+falls outside the period, in which case the EarthRanger time is used, so nothing
+lands in a month the report does not cover.
+
+**Records marked for deletion are left out.** Any report or patrol whose
+title contains "delete" is dropped before anything is counted; the Data
+completeness table says how many.
+
+**Old Ranger Basic forms are shown under the current form's name** (e.g.
+*Wildlife Sighting*, not *Wildlife Sighting (Ranger Basic)*). Old records that
+were copied onto the current forms count once, as the copy.
+
+**A month marked * is a partial month** — the period starts or ends inside it,
+so its totals are not comparable with a full month's.
+
+**Ranger names are harmonised.** The Team Leader and Team members lists in
+EarthRanger spell some rangers differently (*Edung Mosienye* / *Edung Mosieny*,
+*Micka* / *Mika Yiangere*); each pair is reported as one person. A patrol's
+distance and time are credited to every team member, so the ranger table does
+not add up to the patrol totals.
 
 **PIKE** is the proportion of elephant carcasses found that were illegally
 killed. It is only meaningful with a reasonable number of carcasses — with two
 or three, a single case moves it enormously.
 
-**Wildlife numbers are sightings, not population.** *Individuals observed* adds
-up what rangers counted; the same herd seen twice counts twice.
+**Wildlife numbers are sightings, not population.** *Individuals counted* adds
+up what rangers counted on visual sightings; the same herd seen twice counts twice.
 
 **'Unknown' and 'Not recorded' mean the field was left blank**, not that
 something was investigated and came back unknown.
