@@ -33,6 +33,8 @@ base:
     # every case has to state it. rjsf-overrides defaults the run form to this
     # same value, so an untouched form and these cases agree. Set it to [] to
     # exercise the single whole-period view the field also allows.
+    priority_species:
+      vars: ["Elephant", "Lion", "Wild Dog", "Leopard"]
     groupers:
       groupers:
         - temporal_index: '%Y-%m'
@@ -76,6 +78,8 @@ empty:
     # every case has to state it. rjsf-overrides defaults the run form to this
     # same value, so an untouched form and these cases agree. Set it to [] to
     # exercise the single whole-period view the field also allows.
+    priority_species:
+      vars: ["Elephant", "Lion", "Wild Dog", "Leopard"]
     groupers:
       groupers:
         - temporal_index: '%Y-%m'
