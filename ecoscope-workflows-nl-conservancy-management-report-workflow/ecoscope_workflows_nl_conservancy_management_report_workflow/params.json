@@ -298,6 +298,23 @@
       "type": "object",
       "required": [],
       "title": "Group by"
+    },
+    "priority_species": {
+      "additionalProperties": false,
+      "properties": {
+        "vars": {
+          "items": {
+            "type": "string"
+          },
+          "title": "",
+          "type": "array"
+        }
+      },
+      "required": [
+        "vars"
+      ],
+      "type": "object",
+      "title": "Priority Species"
     }
   },
   "$defs": {
@@ -436,7 +453,8 @@
       "time_range",
       "prepared_by",
       "base_map_defs",
-      "groupers"
+      "groupers",
+      "priority_species"
     ]
   },
   "additionalProperties": false

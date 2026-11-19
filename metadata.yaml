@@ -14,15 +14,19 @@ description: >-
 
 theory: >-
   Events are bucketed by month using each event's own incident date where the
-  event type records one (Human Injury, Crop and Infrastructure damage:
-  Incident date & time; Poisoning: Date & time; Arrest: Arrest time; Contact:
-  Contact time), otherwise the EarthRanger event time. Logistics events
-  (Patrol Info, Meeting Report) and the Livestock Household Survey are
-  excluded from all event totals. PIKE is the share of elephant carcasses
-  whose Type of Death is Poached.
+  event type records one and it falls inside the period (Human Injury, Crop
+  and Infrastructure damage: Incident date & time; Poisoning: Date & time;
+  Arrest: Arrest time; Contact: Contact time), otherwise the EarthRanger event
+  time. Device check-ins (Silent Source), patrol details reports, meeting and test forms,
+  the Livestock Household Survey and legacy records that were migrated to a
+  current form are excluded from event totals; legacy event types are reported
+  under their current names. Patrols are clamped to the period and their time
+  is capped at 14 hours each. PIKE is the share of elephant carcasses whose
+  Type of Death is Poached.
 
 output_comment: >-
-  One dashboard view per month in the selected period, plus a Word report
-  (one table row per month) with map and chart figures.
+  One dashboard view per group (per month by default), plus a Word report with
+  whole-period stat cards, month-by-month tables when the period spans more
+  than one month, and maps drawn to the conservancy boundary.
 
 citation: []

@@ -82,12 +82,15 @@ def _check_keys() -> int:
 
     with zipfile.ZipFile(LOCAL) as z:
         text = re.sub(r"<[^>]+>", "", z.read("word/document.xml").decode("utf8"))
-    used = set(re.findall(r"\{\{\s*([a-z_]+)", text)) | set(
-        re.findall(r"\{%\w*\s*if\s+([a-z_]+)", text)
+    used = (
+        set(re.findall(r"\{\{\s*([a-z_]+)", text))
+        | set(re.findall(r"\{%\w*\s*if\s+([a-z_]+)", text))
+        | set(re.findall(r"\{%\w*\s*for\s+\w+\s+in\s+([a-z_]+)", text))
     )
-    # loop variables are bound inside the template, not supplied by the spec
-    used -= {"item", "col", "row", "loop"}
-    supplied = set(re.findall(r"key: ([a-z_]+)", SPEC.read_text()))
+    # loop variables are bound inside the template, not supplied by the spec;
+    # `ns` is the template's own figure/table counter (namespace(t=0, f=0))
+    used -= {"item", "col", "row", "loop", "ns"}
+    supplied = set(re.findall(r"(?m)^\s*key: ([a-z_]+)", SPEC.read_text()))
 
     missing = sorted(used - supplied)
     unused = sorted(supplied - used)
