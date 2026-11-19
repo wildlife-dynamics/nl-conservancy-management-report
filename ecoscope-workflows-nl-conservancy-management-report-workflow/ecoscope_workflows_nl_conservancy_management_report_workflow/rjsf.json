@@ -293,6 +293,31 @@
       "type": "object",
       "required": [],
       "title": "Group by"
+    },
+    "priority_species": {
+      "additionalProperties": false,
+      "properties": {
+        "vars": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Priority species",
+          "type": "array",
+          "description": "Up to five species to map with symbols sized by the number of individuals seen. Use the English name as it appears in the report, e.g. Elephant, Lion, Wild Dog, Leopard, Reticulated Giraffe, Grevys Zebra.",
+          "default": [
+            "Elephant",
+            "Lion",
+            "Wild Dog",
+            "Leopard"
+          ],
+          "maxItems": 5
+        }
+      },
+      "required": [
+        "vars"
+      ],
+      "type": "object",
+      "title": "Priority Species"
     }
   },
   "$defs": {
@@ -431,7 +456,8 @@
       "time_range",
       "prepared_by",
       "base_map_defs",
-      "groupers"
+      "groupers",
+      "priority_species"
     ]
   },
   "additionalProperties": false
