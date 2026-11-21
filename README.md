@@ -36,8 +36,13 @@ In the runner, go to **Workflow Templates** → **Add Workflow Template**, and
 paste this into the **Github Link** field:
 
 ```
-https://github.com/wildlife-dynamics/nl-conservancy-management-report.git
+https://github.com/wildlife-dynamics/nl-management-report.git
 ```
+
+This repository was called `nl-conservancy-management-report` until v0.4.0.
+The longer name put files in Ecoscope Desktop's install folder past Windows'
+260-character path limit, and installs on Windows failed. If you added it
+under the old name, delete that template in Desktop and add this link.
 
 Click **Add Template**. The card may show *Initializing…* for a minute or two
 while the environment is built. This happens once.
@@ -59,7 +64,7 @@ the workflow runs.
 ## Step 3 — Select the workflow
 
 The template appears in **Workflow Templates** as
-`nl-conservancy-management-report`. Click it to open the run form.
+`nl-management-report`. Click it to open the run form.
 
 ## Step 4 — Fill in the form
 
@@ -74,7 +79,10 @@ Seven fields, none of them long.
 | **Time Range** | timezone, **Since** and **Until**. Everything is drawn from this window, and the month-by-month breakdown comes from splitting it. |
 | **Base Maps** | the background for the maps. The defaults are fine. |
 | **Group by** | *Year and Month* (the default) gives one dashboard view per month. Leave it empty for one view over the whole period. The Word report's month-by-month tables appear either way. |
-| **Priority species** | up to five species for the proportional-symbol map (default Elephant, Lion, Wild Dog, Leopard). Use the English name as the report shows it. |
+| **Priority species** | up to five species, one map each, point size = animals counted (default Elephant, Lion, Wild Dog, Leopard). Use the English name as the report shows it, e.g. *Grevy's Zebra*. |
+| **Trajectory filter** | limits on a GPS track segment (the straight line between two fixes). Segments faster than 80 km/h, longer than 10 km or spanning more than an hour are treated as GPS errors or gaps and left out of the maps, distances, coverage and encounter rates. The defaults suit Naibunga Lower; loosen them only if real tracks go missing. |
+| **Patrol Coverage** | grid cell size for the days-since-last-patrol map and the % of the conservancy patrolled (default 1 km). Same method as the [patrol-field-effort](https://github.com/wildlife-dynamics/patrol-field-effort) workflow. |
+| **Wildlife / Illegal Activity Encounter Rate Map** | one form each, the same as the [patrol-encounter-rate-map](https://github.com/wildlife-dynamics/patrol-encounter-rate-map) workflow's *Map Options*. Wildlife defaults to the sum of *Total Individuals* (animals counted), illegal activity to the number of reports. Under Advanced: cell size (default 1 km), the minimum patrol effort below which a cell is greyed (default 0.2 km) and base maps. |
 
 The report template itself is not in the form — it is fetched automatically
 when the workflow runs.
@@ -100,10 +108,10 @@ show the whole period, because their point is the comparison across months.
 | # | Section | What it tells you |
 |---|---|---|
 | 1 | **Patrol effort** | Four cards: patrols, hours, kilometres, average speed. Your top-line effort numbers. Hours are capped at 14 per patrol (see below). |
-| 2 | **Patrol coverage** | Where rangers actually went, one colour per patrol type, plus effort split by transport type and by mandate. |
+| 2 | **Patrol coverage** | Where rangers actually went, one colour per patrol type, plus effort split by transport type and by mandate. For the whole period: the % of the conservancy patrolled, days since each 1 km cell was last patrolled (patrol-field-effort method), and encounter rates (animals and illegal activity per km patrolled, patrol-encounter-rate-map method). |
 | 3 | **Patrol by ranger** | The same effort per ranger, counting team leaders and team members. |
 | 4 | **Event summary** | How many events were recorded and of what type. Patrol details reports, Meeting Report and the Livestock Household Survey are excluded — they are paperwork, not field observations. |
-| 5 | **Wildlife monitoring** | Species seen, split into visual sightings, individuals counted, signs (spoor or dung) and sightings with no type. A second map shows only your priority species, symbol area proportional to the number of animals. |
+| 5 | **Wildlife monitoring** | Species seen, split into visual sightings, individuals counted, signs (spoor or dung) and sightings with no type. One map per priority species follows, point size by animals counted. |
 | 6 | **Animal health** | Carcasses and sick or injured animals, by cause, with a map. |
 | 7 | **MIKE** | The elephant mortality panel: carcasses found, PIKE, and a sunburst of type of death (inner ring) and cause (outer ring). |
 | 8 | **Security** | Arrests, contacts, gunshots, poacher camps and spoor, snares, theft and recovered trophies — counts by type, a map, and a log of each incident. |
@@ -126,9 +134,10 @@ cancelled, is not included. Distance comes from the GPS track, so a patrol with
 no track contributes a patrol count but no kilometres — the Data completeness
 table counts those.
 
-**Patrol time is capped at 14 hours per patrol.** Patrols that are not ended in
-EarthRanger keep running, some for days; uncapped, 61 such patrols made up most
-of the 11,563 hours recorded for Jan–Nov 2026. A patrol that overlaps the start
+**Each patrol counts for at most its first 14 hours** — time, distance and track
+alike, so average speed is distance over time for the same stretch. Patrols that
+are not ended in EarthRanger keep running, some for days; uncapped, 61 such
+patrols made up most of the 11,563 hours recorded for Jan–Nov 2026. A patrol that overlaps the start
 or end of the period counts only the part inside it, and counts in the month it
 started (or the first month, if it started before the period).
 

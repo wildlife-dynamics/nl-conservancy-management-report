@@ -42,7 +42,7 @@ Planted rows (each exercised by the data-completeness table and the cases):
     the event totals can be checked to exclude them
 
 Run from the inner workflow env (needs geopandas + pyarrow):
-    cd ecoscope-workflows-nl-conservancy-management-report-workflow
+    cd ecoscope-workflows-nl-management-report-workflow
     pixi run python ../dev/fixtures/build_naibunga_fixtures.py
 """
 

@@ -34,7 +34,7 @@ file, keeping the file id. Rebuild and re-upload together, then run
 dev/check_template_sync.py.
 
 Run with any Python that has python-docx, e.g. from the inner workflow env:
-    cd ecoscope-workflows-nl-conservancy-management-report-workflow
+    cd ecoscope-workflows-nl-management-report-workflow
     pixi run python ../dev/build_report_template.py
 """
 
@@ -421,8 +421,11 @@ bullets(
         "Crop and Infrastructure Damage, Poisoning, Arrest, Contact) and the "
         "EarthRanger time otherwise. A patrol counts in the month it started; "
         "one that started before the period counts from the first day.",
-        "Patrol time is capped at 14 hours per patrol, because patrols left "
-        "open in EarthRanger keep running for days. See Section 1.",
+        "Patrol time: each patrol counts for at most its first 14 hours -- "
+        "its time, its distance and its track alike -- because patrols left "
+        "open in EarthRanger keep running for days. GPS errors and gaps in a "
+        "track are left out by the trajectory filter set when the report is "
+        "run. See Section 1.",
         "Not counted: device check-ins (Silent Source), patrol details "
         "reports, meeting and test forms, the Livestock Household Survey, and old records that "
         "were copied onto the current forms (the copy is counted, once). "
@@ -449,11 +452,15 @@ bullets(
 doc.add_heading("1. Patrol effort", level=1)
 cards("period_patrol_kpis")
 note(
-    "Time on patrol counts each patrol for at most 14 hours. A patrol that is "
-    "not ended in EarthRanger keeps running, and without the cap a handful of "
+    "Each patrol counts for at most its first 14 hours. A patrol that is not "
+    "ended in EarthRanger keeps running, and without the cap a handful of "
     "patrols left open for days would outweigh every other patrol in the "
-    "period. 'Patrols capped at 14h' counts the patrols this affected; their "
-    "distance is the GPS track actually recorded and is not capped."
+    "period. Time, distance and the track on the maps are all cut at the same "
+    "point, so average speed is distance over time for the same stretch of "
+    "patrol. 'Patrols capped at 14h' counts the patrols this affected. Track "
+    "segments faster than 80 km/h, longer than 10 km or spanning a gap of more "
+    "than an hour are treated as GPS errors and left out (these limits are set "
+    "when the report is run)."
 )
 monthly("patrol_months", "Patrol effort by month")
 single_image(
@@ -478,18 +485,59 @@ table(
     "ranger_summary",
     "Effort by ranger (team leaders and team members)",
     footnote=(
-        "A patrol's distance and time are credited in full to every member "
-        "of its team, so this table does not add up to the patrol totals "
-        "above. Names are harmonised where the Team Leader and Team members "
-        "lists in EarthRanger spell the same person differently."
+        "Covers only patrols with patrol details, which were first recorded on "
+        "25 April 2026. A patrol's distance and time are credited in full to "
+        "every member of its team, so this table does not add up to the patrol "
+        "totals above. Names are harmonised where the Team Leader and Team "
+        "members lists in EarthRanger spell the same person differently. "
+        "'Other (not on the list)' is a team leader who is not one of the three "
+        "names on EarthRanger's Team Leader list (Edung Mosienye, Mika Yiangere, "
+        "Henet Manyaas); the form has no field for who it was, so those patrols "
+        "cannot be credited to a person."
     ),
+)
+
+doc.add_heading("Patrol coverage and encounter rates", level=2)
+about(
+    "Where patrols went over the whole period, on a 1 km grid, using the "
+    "methods of the Ecoscope patrol-field-effort (coverage) and "
+    "patrol-encounter-rate-map (encounter rates) workflows. A cell counts as "
+    "patrolled when a patrol track crosses it; encounter rates divide what was "
+    "recorded in each cell by the kilometres patrolled there. Both use the "
+    "capped, filtered tracks described above, so a patrol left open or a GPS "
+    "jump cannot add effort."
+)
+cards("coverage_cards")
+single_image(
+    "coverage_map", "Days since each 1 km cell was last patrolled (whole period)"
+)
+note(
+    "The grid is 1 km cells cut to the conservancy boundary, so cells along "
+    "the edge are smaller. Days are counted from each cell's most recent "
+    "patrol to the end of the report period and grouped into five natural "
+    "breaks. Grey cells were not patrolled in the period."
+)
+single_image(
+    "wl_encounter_map",
+    "Wildlife encounter rate: animals counted per km patrolled (whole period)",
+)
+single_image(
+    "ia_encounter_map",
+    "Illegal activity encounter rate: reports per km patrolled (whole period)",
+)
+note(
+    "Only reports recorded on a patrol are counted. Wildlife sums the animals "
+    "counted on visual sightings (spoor and dung add none); illegal activity "
+    "counts reports. The grid covers the area patrolled, in 1 km cells. Grey "
+    "cells had under 200 m of patrol effort, too little for a rate; cells "
+    "with no patrol and no report are left blank."
 )
 
 # ---------------------------------------------------------------- 2. events
 doc.add_heading("2. Event summary", level=1)
 cards("period_event_kpis")
 monthly("event_months", "Field reports by month")
-images("event_type_pies", "Share of field reports by type")
+images("event_type_pies", "Field reports by type")
 
 # ---------------------------------------------------------------- 3. wildlife
 doc.add_heading("3. Wildlife monitoring", level=1)
@@ -498,17 +546,26 @@ about(
     "signs (spoor or dung) show a species was present without a count. "
     "Sightings filed without a sighting type are shown separately."
 )
-table("wildlife_summary", "Wildlife sightings by species")
-images("wildlife_maps", "Wildlife sightings")
-images(
-    "priority_maps",
-    "Priority species sightings",
+table(
+    "wildlife_summary",
+    "Wildlife sightings by species",
     footnote=(
-        "Visual sightings of the species chosen when the report is run "
-        "(default: Elephant, Lion, Wild Dog, Leopard). Symbol area is "
-        "proportional to the number of animals counted."
+        "'Unknown' is a sighting whose species was recorded as unknown. "
+        "'Not recorded' is a report with no species at all -- almost all are "
+        "empty legacy Ranger Basic forms that were never copied to the current "
+        "form (Section 9)."
     ),
 )
+images("wildlife_maps", "Wildlife sightings by species")
+about(
+    "Priority species: one map for each species chosen when the report is run "
+    "(default: Elephant, Lion, Wild Dog, Leopard). Visual sightings only; "
+    "point size shows the number of animals counted, as in the legend."
+)
+for n in range(1, 6):
+    tag(f"{{%p if ps{n}_maps and ps{n}_maps is not string %}}")
+    images(f"ps{n}_maps", f"{{{{ ps{n}_name|e }}}} sightings")
+    tag("{%p endif %}")
 
 # ---------------------------------------------------------------- 4. animal health
 doc.add_heading("4. Animal health", level=1)
@@ -520,7 +577,15 @@ about(
 cards("period_ah_kpis")
 monthly("ah_months", "Carcasses and sick or injured animals by month")
 table("ah_by_cause", "Carcasses and sick or injured animals by type of death or injury")
-images("ah_maps", "Carcass and sick or injured animal reports")
+images(
+    "ah_maps",
+    "Carcass and sick or injured animal reports",
+    footnote=(
+        "Reports at exactly the same place are drawn as one point: the two "
+        "speared giraffe reports of 27 August and 3 September 2026 share one "
+        "location, so six sick or injured reports show as five points."
+    ),
+)
 
 # ---------------------------------------------------------------- 5. MIKE
 doc.add_heading("5. MIKE (elephant mortality)", level=1)
@@ -536,7 +601,8 @@ images(
     "Elephant carcasses by type of death and cause",
     footnote=(
         "Inner ring: type of death. Outer ring: the cause recorded for each "
-        "type. Slice size is the number of carcasses."
+        "type, in shades of that type's colour on the carcass map. Numbers in "
+        "brackets and slice sizes are carcasses."
     ),
 )
 table("mike_demographics", "Elephant carcasses by sex, age and condition")
@@ -578,7 +644,7 @@ table("crop_damage", "Crop damage by crop and extent")
 images(
     "hwc_maps",
     "Conflict incident locations",
-    footnote="One point per qualifying report; reports are not grouped into incidents.",
+    footnote="One point per qualifying report, every conflict type included; reports are not grouped into incidents.",
 )
 
 # ---------------------------------------------------------------- 8. human injury / death
@@ -610,8 +676,12 @@ table(
         "before then cannot have them; the second row counts only patrols "
         "since. 'Possible "
         "duplicate reports' are reports of the same type with identical form "
-        "contents, less than 30 minutes and about 1 km apart. 'Visual sightings with 0 individuals' leaves "
-        "out spoor and dung, which carry no count."
+        "contents, less than 30 minutes and about 1 km apart. The three "
+        "Wildlife Sighting rows all take their % of all Wildlife Sighting "
+        "reports, current and legacy. Only visual sightings are checked for "
+        "0 individuals, since spoor and dung carry no count. 'Marked for deletion' takes its "
+        "% of the field reports this report would count had none been marked; "
+        "an old report and its migrated copy count once."
     ),
 )
 
