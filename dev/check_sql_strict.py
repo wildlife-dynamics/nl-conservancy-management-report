@@ -1,4 +1,4 @@
-"""Strict SQL check for nl-conservancy-management-report.
+"""Strict SQL check for nl-management-report.
 
 Runs EVERY apply_sql_query task in spec.yaml the way Ecoscope Desktop does:
 the task's own validator and deny-by-default SQLite authorizer (copied
@@ -472,6 +472,19 @@ def patrols():
             segment_end=pd.Timestamp("2026-01-01T06:00:00Z"),
             geometry="LINESTRING (37 0.5, 37.01 0.5)",
         ),
+        # still open 15 hours after its (clamped) start: past the 14 h cap, so
+        # this segment's 9 km must not count -- distance capped with time
+        dict(
+            patrol_id="patrol-0",
+            patrol_type__display="Routine Patrol",
+            patrol_serial_number=100,
+            speed_kmhr=9.0,
+            dist_meters=9000.0,
+            timespan_seconds=3600.0,
+            segment_start=pd.Timestamp("2026-01-01T12:30:00Z"),
+            segment_end=pd.Timestamp("2026-01-01T13:30:00Z"),
+            geometry="LINESTRING (37 0.5, 37.08 0.5)",
+        ),
         dict(
             patrol_id="patrol-1",
             patrol_type__display="Motorbike Patrol",
@@ -549,8 +562,10 @@ def main():
     pr, tr = patrols()
     tr = to_local(tr, ["segment_start", "segment_end"])
     traj_period = pd.merge(tr, bounds, how="cross")
-    traj_in = run("traj_in", traj_period)
     master = run("patrols_master", pr)
+    # Attach Patrol Start to Tracks: every column of patrols_master, left join
+    traj_with_start = traj_period.merge(master, how="left", on="patrol_id")
+    traj_in = run("traj_in", traj_with_start)
     tracks = run("patrol_tracks", traj_in)
     pinfo = run("patrol_info", prep)
     j = master.merge(tracks, how="left", on="patrol_id").merge(
@@ -576,11 +591,35 @@ def main():
             msg = "one row (install shapely to validate the polygon)"
     report("boundary", ok, msg)
 
+    # ---- coverage card, on a grid shaped like patrol-field-effort's
+    # add_non_null_flag output (bool `visited`, one row per clipped 1 km cell)
+    fake_grid = pd.DataFrame(
+        dict(
+            geometry=["POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0))"] * 4,
+            index=[0, 1, 2, 3],
+            days_since_visit=[3.0, 40.0, None, None],
+            visited=[True, True, False, False],
+        )
+    )
+    cc = run("coverage_cards", fake_grid)
+    report(
+        "coverage_cards",
+        cc is not None and cc.iloc[0].tolist() == ["50.0%", "2 of 4"],
+        cc.to_dict("records") if cc is not None else "",
+    )
+
+    pk = run("priority_size_pt", evs.head(1))
+    report(
+        "priority_size_pt",
+        pk is not None and len(pk) == 1,
+        "one point for the size legend",
+    )
+
     # ---- every other query, on the frames it reads in the DAG
     dchk = run("deleted_checks", evs)
     report(
         "deleted_checks",
-        dchk is not None and int(dchk["Count"].iloc[0]) == 3,
+        dchk is not None and int(dchk["Count"].iloc[0]) == 2,
         f"{dchk.to_dict('records') if dchk is not None else ''}",
     )
     done = {
@@ -594,6 +633,8 @@ def main():
         "patrol_table",
         "boundary",
         "completeness",
+        "priority_size_pt",
+        "coverage_cards",
     }
     outs = {}
     for tid, t in TASKS.items():
@@ -757,13 +798,13 @@ def main():
     cp = comp.set_index("Check")["Count"]
     expect(
         "visual 0 only",
-        cp["Visual sightings with 0 individuals"] == "0",
+        cp["Visual Wildlife Sighting reports with 0 individuals"] == "0",
         "spoor, dung and no-type sightings are not flagged",
     )
     expect(
         "no-type sightings",
-        cp["Sightings with no sighting type"] != "0",
-        f"{cp['Sightings with no sighting type']}",
+        cp["Wildlife Sighting reports with no sighting type"] != "0",
+        f"{cp["Wildlife Sighting reports with no sighting type"]}",
     )
     expect(
         "duplicates found",
@@ -776,7 +817,9 @@ def main():
         f"{cp['Possible duplicate reports (same form contents, < 30 min and < 1 km apart)']} flagged",
     )
     expect(
-        "open patrols", cp["Patrols left open over 14h (time capped at 14h)"] == "1", ""
+        "open patrols",
+        cp["Patrols left open over 14h (time and distance capped at 14h)"] == "1",
+        "",
     )
     if has_live:
         hk = outs["period_hwc_kpis"].iloc[0]

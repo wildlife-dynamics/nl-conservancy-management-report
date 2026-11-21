@@ -1,4 +1,4 @@
-id: nl_conservancy_management_report
+id: nl_management_report
 requirements:
 - name: ecoscope-platform
   version: '>=2.28.0, <2.29.0'
@@ -16,6 +16,19 @@ requirements:
 - name: ecoscope-workflows-ext-wd
   version: 0.0.14
   channel: https://repo.prefix.dev/ecoscope-workflows-custom/
+# For the Patrol Coverage tasks, copied from patrol-field-effort. That
+# workflow pins ext-mep 1.0.3 / ext-ste 0.0.0rc1, which cannot load with
+# ext-custom 0.1.5: ext-ste 0.0.0rc1 imports ext_custom.tasks.results._map
+# (gone in 0.1.5) and ext-mep imports ext-ste, so the compiler found none of
+# their tasks. These are the first releases built on ext-custom >=0.1.4; the
+# same tasks, arguments and module paths (checked against wt-registry,
+# 20 Nov 2026).
+- name: ecoscope-workflows-ext-mep
+  version: 1.11.2
+  channel: https://repo.prefix.dev/ecoscope-workflows-custom/
+- name: ecoscope-workflows-ext-ste
+  version: 0.0.36
+  channel: https://repo.prefix.dev/ecoscope-workflows-custom/
 rjsf-overrides:
   properties:
     # Review: "allow users to select up to five species during report
@@ -26,7 +39,7 @@ rjsf-overrides:
     priority_species.properties.vars.description: >-
       Up to five species to map with symbols sized by the number of individuals
       seen. Use the English name as it appears in the report, e.g. Elephant,
-      Lion, Wild Dog, Leopard, Reticulated Giraffe, Grevys Zebra.
+      Lion, Wild Dog, Leopard, Reticulated Giraffe, Grevy's Zebra.
     priority_species.properties.vars.default:
     - Elephant
     - Lion
@@ -64,11 +77,136 @@ rjsf-overrides:
     - temporal_index: '%Y-%m'
     groupers.properties.groupers.items.anyOf:
     - $ref: '#/$defs/TemporalGrouper'
+    # TRAJECTORY FILTER, ON THE FORM. Review 2: "Fig. 2 shows long straight
+    # lines across the landscape, which look like GPS jumps or gaps. Please
+    # expose the trajectory filter (max speed / max segment length) in the
+    # configuration" and "apply ... a trajectory speed filter (~60-80 km/h
+    # rather than the 120 km/h default) so open patrols and GPS jumps don't
+    # create false hotspots or inflate effort." A segment is the straight line
+    # between two consecutive GPS fixes; one is dropped (from the map, the
+    # distance, the coverage grid and the encounter rates alike) when it is
+    # faster than any patrol can move, longer than a fix interval allows, or
+    # spans a gap long enough that the straight line is a guess. Defaults:
+    # 80 km/h (a vehicle on a good road), 10 km, 1 hour. The old fixed filter
+    # allowed 500 km/h, 100 km and 48 hours.
+    traj_filters.properties.trajectory_segment_filter.description: >-
+      A patrol track is the straight line between consecutive GPS fixes.
+      Segments outside these limits are treated as GPS errors or gaps and are
+      left out of the maps, the distance and the coverage figures.
+    traj_filters.properties.trajectory_segment_filter.properties.max_speed_kmhr.default: 80
+    traj_filters.properties.trajectory_segment_filter.properties.max_length_meters.default: 10000
+    traj_filters.properties.trajectory_segment_filter.properties.max_time_secs.default: 3600
+    # PATROL COVERAGE GRID: 1 km cells, as patrol-field-effort sets it.
+    Patrol Coverage.properties.create_geo_meshgrid.properties.auto_scale_or_custom_cell_size.anyOf:
+    - $ref: '#/$defs/CustomGridCellSize'
+    Patrol Coverage.properties.create_geo_meshgrid.properties.auto_scale_or_custom_cell_size.default:
+      auto_scale_or_custom: Customize
+      grid_cell_size: 1000
+    Wildlife Encounter Rate Map.properties.wl_map_options.properties.auto_scale_or_custom_cell_size.anyOf:
+    - $ref: '#/$defs/AutoScaleGridCellSize'
+    - $ref: '#/$defs/CustomGridCellSize'
+    Illegal Activity Encounter Rate Map.properties.ia_map_options.properties.auto_scale_or_custom_cell_size.anyOf:
+    - $ref: '#/$defs/AutoScaleGridCellSize'
+    - $ref: '#/$defs/CustomGridCellSize'
+    # ENCOUNTER RATE MAPS: patrol-encounter-rate-map's Map Options form, one
+    # per map. Defaults: 1 km cells like the coverage grid; the wildlife map
+    # sums the animals counted (review 2: "Wildlife Sightings (sum of number
+    # of animals)"), the illegal activity map counts reports.
+    Wildlife Encounter Rate Map.properties.wl_map_options.title: ''
+    Wildlife Encounter Rate Map.properties.wl_map_options.properties.aggregation.default:
+      count_or_sum: Sum of Column
+      column: Total Individuals
+    # The form fills each field from its own default, not from the object
+    # default above (run of 21 Nov 2026 counted events), so set them too.
+    Wildlife Encounter Rate Map.properties.wl_map_options.properties.aggregation.properties.count_or_sum.default: Sum of Column
+    Wildlife Encounter Rate Map.properties.wl_map_options.properties.aggregation.allOf:
+    - if:
+        properties:
+          count_or_sum:
+            const: Sum of Column
+      then:
+        properties:
+          column:
+            type: string
+            title: Event Field to Sum
+            default: Total Individuals
+            description: Event details field whose values are totaled, using the field title shown in EarthRanger (for example "Number of Animals").
+    Wildlife Encounter Rate Map.properties.wl_map_options.properties.auto_scale_or_custom_cell_size.default:
+      auto_scale_or_custom: Customize
+      grid_cell_size: 1000
+    Illegal Activity Encounter Rate Map.properties.ia_map_options.title: ''
+    Illegal Activity Encounter Rate Map.properties.ia_map_options.properties.aggregation.default:
+      count_or_sum: Count
+    Illegal Activity Encounter Rate Map.properties.ia_map_options.properties.auto_scale_or_custom_cell_size.default:
+      auto_scale_or_custom: Customize
+      grid_cell_size: 1000
     base_map_defs.properties.base_maps.default:
     - url: https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}
       opacity: 1
     - url: https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}
       opacity: 0.5
+  # 1 km cells everywhere. As with the aggregation, the form takes the cell
+  # size from the Customize option's own grid_cell_size default (5000 in the
+  # platform), not from the object defaults above: the run of 21 Nov 2026
+  # drew 5 km cells. Same definition as ecoscope-platform 2.28 apart from
+  # that default.
+  $defs:
+    CustomGridCellSize:
+      title: Customize
+      type: object
+      properties:
+        auto_scale_or_custom:
+          const: Customize
+          default: Customize
+          ecoscope:advanced: true
+          title: Grid Cell Size
+          type: string
+        grid_cell_size:
+          default: 1000
+          description: Define the resolution of the raster grid (in the unit of measurement defined by the coordinate reference system set below). A smaller grid cell size provides more detail, while a larger size generalizes the data.
+          exclusiveMaximum: 10000
+          exclusiveMinimum: 0
+          gt: 0
+          lt: 10000
+          title: Custom Grid Cell Size
+          type: number
+  uiSchema:
+    Patrol Coverage.create_geo_meshgrid.auto_scale_or_custom_cell_size.auto_scale_or_custom:
+      ui:widget: hidden
+    Wildlife Encounter Rate Map.wl_map_options.base_maps.items.ui:options.label: false
+    Wildlife Encounter Rate Map.wl_map_options.aggregation:
+      count_or_sum:
+        ui:help: Number of Events counts events per grid cell; Sum of an Event Field totals a chosen event details field (for example Number of Animals) instead.
+    Wildlife Encounter Rate Map.wl_map_options.auto_scale_or_custom_cell_size:
+      anyOf:
+      - ui:help: Auto-scale for an optimized grid cell size based on the workflow data or Customize to set a specific grid cell size.
+        ui:options:
+          label: false
+        auto_scale_or_custom:
+          ui:widget: hidden
+      - ui:options:
+          label: false
+        auto_scale_or_custom:
+          ui:widget: hidden
+      auto_scale_or_custom:
+        ui:widget: hidden
+    Illegal Activity Encounter Rate Map.ia_map_options.base_maps.items.ui:options.label: false
+    Illegal Activity Encounter Rate Map.ia_map_options.aggregation:
+      count_or_sum:
+        ui:help: Number of Events counts events per grid cell; Sum of an Event Field totals a chosen event details field (for example Number of Animals) instead.
+    Illegal Activity Encounter Rate Map.ia_map_options.auto_scale_or_custom_cell_size:
+      anyOf:
+      - ui:help: Auto-scale for an optimized grid cell size based on the workflow data or Customize to set a specific grid cell size.
+        ui:options:
+          label: false
+        auto_scale_or_custom:
+          ui:widget: hidden
+      - ui:options:
+          label: false
+        auto_scale_or_custom:
+          ui:widget: hidden
+      auto_scale_or_custom:
+        ui:widget: hidden
 task-instance-defaults:
   skipif:
     conditions:
@@ -105,6 +243,24 @@ workflow:
 - name: Priority Species
   id: priority_species
   task: set_list_of_string_vars
+- name: Trajectory Filter
+  id: traj_filters
+  task: ecoscope.platform.tasks.config.set_traj_filters
+- name: Bounding Box
+  id: traj_bbox
+  task: ecoscope.platform.tasks.config.get_bounding_box
+  partial:
+    filters: ${{ workflow.traj_filters.return }}
+- name: Excluded Coordinates
+  id: traj_bad_coords
+  task: ecoscope.platform.tasks.config.get_filter_point_coords
+  partial:
+    filters: ${{ workflow.traj_filters.return }}
+- name: Segment Filter
+  id: traj_segment_filter
+  task: ecoscope.platform.tasks.config.get_segment_filter
+  partial:
+    filters: ${{ workflow.traj_filters.return }}
 - title: Fetch Events
   type: task-group
   description: All events in the period; sections select their event types in SQL.
@@ -182,6 +338,9 @@ workflow:
   # species_h: the animal RESPONSIBLE (HWC forms). animal_h: the animal
   # seen, found dead or hurt (sightings, carcasses, sick / injured).
   # "Hyena - Spotted" -> "Spotted Hyena"
+  # Review 2: names with an apostrophe or hyphen are written properly --
+  # Grevy's Zebra, Burchell's Zebra, Thomson's Gazelle (one p), Grant's
+  # Gazelle, Dik-dik -- wherever they appear (tables, legends, map keys).
   # ER labels are bilingual ("Lion / Simba"): keep the English half.
   # Carcass and Sick / Injured choice labels are long ("Conflict -
   # fill in relevant HWC form", "Problem Animal Control / Management").
@@ -291,10 +450,11 @@ workflow:
              WHEN LOWER(sp2) IN ('baboon, olive', 'baboon olive', 'olive baboon') THEN 'Olive Baboon'
              WHEN LOWER(sp2) IN ('hyena, spotted', 'hyena spotted', 'spotted hyena') THEN 'Spotted Hyena'
              WHEN LOWER(sp2) IN ('hyena, striped', 'hyena striped', 'striped hyena') THEN 'Striped Hyena'
-             WHEN LOWER(sp2) IN ('zebra, burchells', 'burchells zebra') THEN 'Burchells Zebra'
-             WHEN LOWER(sp2) IN ('zebra, grevys', 'grevys zebra', 'grevy''s zebra') THEN 'Grevys Zebra'
-             WHEN LOWER(sp2) IN ('gazelle, grants', 'grants gazelle') THEN 'Grants Gazelle'
-             WHEN LOWER(sp2) IN ('gazelle, thompsons', 'thompsons gazelle') THEN 'Thompsons Gazelle'
+             WHEN LOWER(sp2) IN ('zebra, burchells', 'burchells zebra', 'burchell''s zebra') THEN 'Burchell''s Zebra'
+             WHEN LOWER(sp2) IN ('zebra, grevys', 'grevys zebra', 'grevy''s zebra') THEN 'Grevy''s Zebra'
+             WHEN LOWER(sp2) IN ('gazelle, grants', 'grants gazelle', 'grant''s gazelle') THEN 'Grant''s Gazelle'
+             WHEN LOWER(sp2) IN ('gazelle, thompsons', 'thompsons gazelle', 'thomson''s gazelle', 'thomsons gazelle') THEN 'Thomson''s Gazelle'
+             WHEN LOWER(sp2) IN ('dikdik', 'dik-dik', 'dik dik') THEN 'Dik-dik'
              WHEN LOWER(sp2) IN ('kudu, lesser', 'lesser kudu') THEN 'Lesser Kudu'
              WHEN LOWER(sp2) IN ('kudu, greater', 'greater kudu') THEN 'Greater Kudu'
              WHEN LOWER(sp2) IN ('jackal, side striped', 'side striped jackal', 'side-striped jackal') THEN 'Side-striped Jackal'
@@ -525,30 +685,15 @@ workflow:
       roi_gdf: null
       roi_name: null
       reset_index: false
-      bounding_box:
-        min_x: -180.0
-        max_x: 180.0
-        min_y: -90.0
-        max_y: 90.0
-      filter_point_coords:
-      - x: 180.0
-        y: 90.0
-      - x: 0.0
-        y: 0.0
-      - x: 1.0
-        y: 1.0
+      bounding_box: ${{ workflow.traj_bbox.return }}
+      filter_point_coords: ${{ workflow.traj_bad_coords.return }}
+  # Segment limits from the run form (Trajectory Filter); see rjsf-overrides.
   - name: Patrol Trajectories
     id: patrol_traj
     task: relocations_to_trajectory
     partial:
       relocations: ${{ workflow.patrol_obs_filtered.return }}
-      trajectory_segment_filter:
-        min_length_meters: 0.001
-        max_length_meters: 100000
-        min_time_secs: 1
-        max_time_secs: 172800
-        min_speed_kmhr: 0.01
-        max_speed_kmhr: 500
+      trajectory_segment_filter: ${{ workflow.traj_segment_filter.return }}
   - name: Remove Trajectory Prefix
     id: patrol_traj_clean
     task: drop_column_prefix
@@ -607,29 +752,6 @@ workflow:
       left_index: false
       right_index: false
       fillna_value: null
-  # Track segments inside the period only. A patrol's observations are fetched
-  # for its whole own time window, not the report's, so a patrol left open from
-  # December into January used to bring its December track (and distance) with
-  # it. patrol_key is the patrol type when it has a fixed colour, 'Other'
-  # otherwise -- the same three colours as Fig. "Patrol distance per month".
-  - name: Tracks Inside the Period
-    id: traj_in
-    task: apply_sql_query
-    skipif:
-      conditions: *id001
-    partial:
-      df: ${{ workflow.traj_period.return }}
-      query: |
-        SELECT patrol_id, patrol_type__display, patrol_serial_number, speed_kmhr,
-               dist_meters, timespan_seconds, segment_start, segment_end, geometry,
-               CASE WHEN patrol_type__display IN ('Routine Patrol', 'Motorbike Patrol', 'Joint Operations Mobile Patrol')
-                    THEN patrol_type__display ELSE 'Other' END AS patrol_key
-        FROM df
-        WHERE COALESCE(patrol_type__display, '') <> 'Test Patrol'
-          AND (period_lo IS NULL
-               OR (julianday(segment_start) >= julianday(period_lo) AND julianday(segment_start) <= julianday(period_hi)))
-      columns: null
-      sanitize: true
   - name: Patrols or Empty Frame
     id: patrols_safe
     task: concat_dataframes
@@ -644,22 +766,6 @@ workflow:
       - serial_number
       - title
       - patrol_segments
-  - name: Patrol Track Totals
-    id: patrol_tracks
-    task: apply_sql_query
-    skipif:
-      conditions: *id001
-    partial:
-      df: ${{ workflow.traj_in.return }}
-      query: |
-        SELECT patrol_id,
-               MAX(patrol_type__display) AS patrol_type,
-               COUNT(*) AS n_segments,
-               SUM(dist_meters) / 1000.0 AS distance_km,
-               SUM(timespan_seconds) / 3600.0 AS tracked_hours
-        FROM df GROUP BY patrol_id
-      columns: null
-      sanitize: true
   # SQL notes:
   # GROUP BY id: one row per patrol even if a page boundary in the ER
   # patrol listing hands the same patrol over twice.
@@ -698,6 +804,79 @@ workflow:
                MAX(CASE WHEN json_type(json_extract(patrol_segments, '$[0].segment_details')) = 'object'
                          AND json_extract(patrol_segments, '$[0].segment_details') <> '{}' THEN 1 ELSE 0 END) AS has_patrol_details
         FROM df WHERE LOWER(COALESCE(title, '')) NOT LIKE '%delet%' GROUP BY id
+      columns: null
+      sanitize: true
+  # Each track segment learns its patrol's start, so it can be cut at the
+  # 14-hour cap below. patrols_master is one row per patrol (id, start_raw).
+  - name: Attach Patrol Start to Tracks
+    id: traj_with_start
+    task: ecoscope_workflows_ext_custom.tasks.transformation.merge_two_dataframes
+    skipif:
+      conditions:
+      - any_dependency_skipped
+    partial:
+      left: ${{ workflow.traj_period.return }}
+      right: ${{ workflow.patrols_master.return }}
+      how: left
+      'on': patrol_id
+      left_on: null
+      right_on: null
+      left_index: false
+      right_index: false
+      fillna_value: null
+  # Track segments inside the period only. A patrol's observations are fetched
+  # for its whole own time window, not the report's, so a patrol left open from
+  # December into January used to bring its December track (and distance) with
+  # it. patrol_key is the patrol type when it has a fixed colour, 'Other'
+  # otherwise -- the same three colours as Fig. "Patrol distance per month".
+  #
+  # AND ONLY THE FIRST 14 HOURS OF EACH PATROL. Review 2: "Average speed is
+  # distorted. Make sure the cap at 14 h is applied to both time and
+  # distance." Time was capped (Build Patrol Table) but the track was not, so
+  # a patrol left open for three days kept three days of kilometres against
+  # 14 hours -- January read 4,587 km in 232 h, 19.8 km/h. A segment now
+  # counts only if it starts within 14 hours of the patrol's start (its start
+  # clamped to the period, the same start the time cap uses). Distance, time
+  # and speed then describe the same stretch of every patrol, and the map,
+  # the coverage grid and the encounter rates all use these same segments.
+  - name: Tracks Inside the Period
+    id: traj_in
+    task: apply_sql_query
+    skipif:
+      conditions: *id001
+    partial:
+      df: ${{ workflow.traj_with_start.return }}
+      query: |
+        SELECT patrol_id, patrol_type__display, patrol_serial_number, speed_kmhr,
+               dist_meters, timespan_seconds, segment_start, segment_end, geometry, period_hi,
+               CASE WHEN patrol_type__display IN ('Routine Patrol', 'Motorbike Patrol', 'Joint Operations Mobile Patrol')
+                    THEN patrol_type__display ELSE 'Other' END AS patrol_key
+        FROM (
+          SELECT *, CASE WHEN start_raw IS NULL THEN NULL
+                         WHEN period_lo IS NOT NULL AND julianday(start_raw) < julianday(period_lo) THEN julianday(period_lo)
+                         ELSE julianday(start_raw) END AS start_jd
+          FROM df
+        )
+        WHERE COALESCE(patrol_type__display, '') <> 'Test Patrol'
+          AND (period_lo IS NULL
+               OR (julianday(segment_start) >= julianday(period_lo) AND julianday(segment_start) <= julianday(period_hi)))
+          AND (start_jd IS NULL OR julianday(segment_start) < start_jd + 14.0 / 24.0)
+      columns: null
+      sanitize: true
+  - name: Patrol Track Totals
+    id: patrol_tracks
+    task: apply_sql_query
+    skipif:
+      conditions: *id001
+    partial:
+      df: ${{ workflow.traj_in.return }}
+      query: |
+        SELECT patrol_id,
+               MAX(patrol_type__display) AS patrol_type,
+               COUNT(*) AS n_segments,
+               SUM(dist_meters) / 1000.0 AS distance_km,
+               SUM(timespan_seconds) / 3600.0 AS tracked_hours
+        FROM df GROUP BY patrol_id
       columns: null
       sanitize: true
   - name: Patrol Details from the Earlier Report Form
@@ -782,7 +961,9 @@ workflow:
   # capping patrol duration at 14 hours for effort calculations." Patrols that
   # rangers forget to close run on for days; 61 of 317 did over Jan-Nov 2026.
   # Each one now contributes at most 14 hours (open_over_14h keeps the flag for
-  # the data completeness table and the footnote). start_time stays UTC ISO
+  # the data completeness table and the footnote). Its DISTANCE is capped at
+  # the same point: distance_km comes from Tracks Inside the Period, which
+  # keeps only segments starting within 14 hours of this same clamped start. start_time stays UTC ISO
   # whichever bound wins, so the column parses as one format downstream.
   - name: Build Patrol Table
     id: patrol_table
@@ -1304,6 +1485,9 @@ workflow:
                    WHEN 'peter_kermui' THEN 'Peter Kermui'
                    WHEN 'robert_karkuli' THEN 'Robert Karkuli'
                    WHEN 'samuel_leshao' THEN 'Samuel Leshao'
+                   WHEN 'samuel_leshay' THEN 'Samuel Leshao'
+                   WHEN 'samuel_meshanu' THEN 'Samuel Meshami'
+                   WHEN 'tony_lekerisat' THEN 'Tony Lekerisae'
                    WHEN 'samuel_meshami' THEN 'Samuel Meshami'
                    WHEN 'silamo_siangau' THEN 'Silamo Siangau'
                    WHEN 'simpiri_alex' THEN 'Simpiri Alex'
@@ -1379,6 +1563,759 @@ workflow:
     task: merge_widget_views
     partial:
       widgets: ${{ workflow.ranger_tbl_w.return }}
+- title: Patrol Coverage
+  type: task-group
+  description: Days since each 1 km cell was last patrolled, and the share of the conservancy patrolled (patrol-field-effort).
+  tasks:
+  # COVERAGE. Review 2: "add a '% of conservancy patrolled' stat card and a
+  # 'Days since last patrol' grid map (1 km cells, clipped to the conservancy
+  # boundary), using the patrol-field-effort workflow."
+  #
+  # This is patrol-field-effort's own task chain (github.com/wildlife-dynamics/
+  # patrol-field-effort, spec.yaml, "Create Analysis Grid" to "Calculate
+  # Patrol Coverage Fraction"), copied task for task with the same ids and
+  # parameters. Only the inputs differ:
+  #   - the study area is the Naibunga Lower boundary (Conservancy Boundary)
+  #     instead of an ER spatial feature picked on the form;
+  #   - the tracks are Tracks Inside the Period -- cut to the period, capped at
+  #     14 h and through the trajectory filter -- instead of raw patrol
+  #     trajectories, so an open patrol or a GPS jump cannot mark cells it
+  #     never reached. Tracks Inside the Period is SQL output, whose
+  #     timestamps come back as text, so the two Parse steps turn
+  #     segment_start / segment_end back into datetimes first;
+  #   - the map is drawn with draw_ecomap like every other map in the report
+  #     (same base maps, boundary, north arrow, scale bar, fixed view), from
+  #     the same rgba colours and legend that patrol-field-effort's map uses.
+  # Package versions: see requirements (ext-mep 1.11.2 / ext-ste 0.0.36, not
+  # the 1.0.3 / 0.0.0rc1 that workflow pins, which cannot load beside
+  # ext-custom 0.1.5).
+  # The dwell-time and route-density maps of that workflow are not part of
+  # the review request and are left out.
+  - name: Validate Study Area Geometry
+    id: assert_polygon
+    task: ecoscope_workflows_ext_mep.tasks.spatial_operations.assert_polygon_types
+    partial:
+      gdf: ${{ workflow.boundary.return }}
+  - name: Prepare Study Area for Analysis
+    id: reproject_spatial_3857
+    task: reproject_gdf
+    partial:
+      gdf: ${{ workflow.assert_polygon.return }}
+      target_crs: EPSG:3857
+  - name: Create Analysis Grid
+    id: create_geo_meshgrid
+    task: create_meshgrid
+    partial:
+      aoi: ${{ workflow.reproject_spatial_3857.return }}
+      crs: EPSG:3857
+      intersecting_only: true
+  - name: Clip Grid to Study Area
+    id: overlay_meshgrid_spatial
+    task: ecoscope_workflows_ext_mep.tasks.spatial_operations.overlay_gdf
+    partial:
+      left: ${{ workflow.create_geo_meshgrid.return }}
+      right: ${{ workflow.reproject_spatial_3857.return }}
+      how: intersection
+      keep_geom_type: true
+      make_valid: true
+  - name: Reset Index on Meshgrid
+    id: meshgrid_idx_id
+    task: ecoscope_workflows_ext_mep.tasks.transformation.reset_dataframe_index
+    partial:
+      df: ${{ workflow.overlay_meshgrid_spatial.return }}
+      drop: false
+  - name: Parse Track Start Times
+    id: cov_traj_start
+    task: extract_column_as_type
+    partial:
+      df: ${{ workflow.traj_in.return }}
+      column_name: segment_start
+      output_type: datetime
+      output_column_name: segment_start
+      fan_out: true
+  - name: Parse Track End Times
+    id: cov_traj_times
+    task: extract_column_as_type
+    partial:
+      df: ${{ workflow.cov_traj_start.return }}
+      column_name: segment_end
+      output_type: datetime
+      output_column_name: segment_end
+      fan_out: true
+  - name: Prepare Patrol Trajectories for Analysis
+    id: reproject_trajs
+    task: reproject_gdf
+    partial:
+      gdf: ${{ workflow.cov_traj_times.return }}
+      target_crs: EPSG:3857
+  - name: Select Trajectory Columns
+    id: select_patrol_columns
+    task: select_columns
+    partial:
+      df: ${{ workflow.reproject_trajs.return }}
+      columns: [segment_start, segment_end, geometry]
+      raise_on_missing: true
+  - name: Overlay Patrols on Grid
+    id: spatial_join_patrol_trajs
+    task: ecoscope_workflows_ext_ste.tasks.spatial_operations.spatial_join
+    partial:
+      left_df: ${{ workflow.select_patrol_columns.return }}
+      right_df: ${{ workflow.meshgrid_idx_id.return }}
+      how: inner
+      predicate: intersects
+  - name: Summarize Patrol Visits per Grid Cell
+    id: summarize_df_grids
+    task: summarize_df
+    partial:
+      df: ${{ workflow.spatial_join_patrol_trajs.return }}
+      groupby_cols: [index]
+      reset_index: true
+      summary_params:
+      - display_name: last_visited
+        aggregator: max
+        column: segment_end
+        original_unit: null
+        new_unit: null
+        decimal_places: null
+      - display_name: first_visited
+        aggregator: min
+        column: segment_start
+        original_unit: null
+        new_unit: null
+        decimal_places: null
+  - name: Calculate Days Since Last Visit
+    id: add_time
+    task: ecoscope_workflows_ext_mep.tasks.transformation.add_time_since_visit
+    partial:
+      df: ${{ workflow.summarize_df_grids.return }}
+      time_range: ${{ workflow.time_range.return }}
+  - name: Attach Visit Stats to Grid
+    id: merge_gridded_stats
+    task: merge_two_dataframes
+    partial:
+      left: ${{ workflow.meshgrid_idx_id.return }}
+      right: ${{ workflow.add_time.return }}
+      how: left
+      'on': index
+      left_on: null
+      right_on: null
+      left_index: false
+      right_index: false
+      fillna_value: null
+  - name: Flag Visited Cells (Days Since Visit)
+    id: add_null_flag
+    task: ecoscope_workflows_ext_mep.tasks.transformation.add_non_null_flag
+    partial:
+      df: ${{ workflow.merge_gridded_stats.return }}
+      source_column: days_since_visit
+      flag_column: visited
+  - name: Classify Days Since Visit into Bins
+    id: add_custom_visit_bins
+    task: ecoscope_workflows_ext_mep.tasks.transformation.add_visit_bins
+    partial:
+      df: ${{ workflow.add_null_flag.return }}
+      col: days_since_visit
+      mask_col: visited
+      new_col: visit_bin
+      bins: 5
+      scheme: natural_breaks
+      no_data_label: Unvisited
+      use_abs: true
+  - name: Color Days Since Visit Bins
+    id: add_visit_bin_colors
+    task: ecoscope_workflows_ext_mep.tasks.transformation.add_bin_colors
+    partial:
+      df: ${{ workflow.add_custom_visit_bins.return }}
+      col: visit_bin
+      new_col: hex_color
+      cmap:
+        type_: palette
+        name: RdYlGn
+      no_data_color: '#808080'
+      no_data_label: Unvisited
+  - name: Prepare Visit Layer for Mapping
+    id: reproject_4326
+    task: reproject_gdf
+    partial:
+      gdf: ${{ workflow.add_visit_bin_colors.return }}
+      target_crs: EPSG:4326
+  - name: Decategorize Hex Colors (Days Since Visit)
+    id: decat_time_visit_hex
+    task: convert_column_values_to_string
+    partial:
+      df: ${{ workflow.reproject_4326.return }}
+      columns: [hex_color]
+  - name: Prepare Colors for Days Since Visit Map
+    id: add_time_visit_rgba
+    task: ecoscope_workflows_ext_ste.tasks.transformation.add_rgba_from_hex
+    partial:
+      df: ${{ workflow.decat_time_visit_hex.return }}
+      column: hex_color
+      new_column: rgba_color
+  - name: Sort Days Since Visit Legend
+    id: order_bin_visit_since
+    task: ecoscope_workflows_ext_mep.tasks.transformation.order_bin_categories
+    partial:
+      df: ${{ workflow.add_time_visit_rgba.return }}
+      bin_column: visit_bin
+  # The map layer carries only what it draws; the first/last visit
+  # timestamps stay in the grid above.
+  - name: Days Since Visit Map Columns
+    id: cov_map_cols
+    task: select_columns
+    partial:
+      df: ${{ workflow.order_bin_visit_since.return }}
+      columns: [geometry, visit_bin, rgba_color, days_since_visit]
+      raise_on_missing: true
+  - name: Build Days Since Visit Map Layer
+    id: coverage_layer
+    task: create_polygon_layer
+    skipif:
+      conditions: *id003
+    partial:
+      geodataframe: ${{ workflow.cov_map_cols.return }}
+      layer_style:
+        fill_color_column: rgba_color
+        get_line_color: [0, 0, 0, 255]
+        get_line_width: 0.25
+        stroked: true
+        opacity: 0.55
+      legend:
+        title: Time Since Visit (Days)
+        label_column: visit_bin
+        color_column: rgba_color
+        sort: ascending
+      tooltip_columns:
+      - visit_bin
+  - name: Render Days Since Visit Map
+    id: coverage_map
+    task: draw_ecomap
+    partial:
+      geo_layers:
+      - ${{ workflow.coverage_layer.return }}
+      - ${{ workflow.boundary_layer.return }}
+      tile_layers: ${{ workflow.base_map_defs.return }}
+      static: false
+      title: null
+      north_arrow_style: *map_arrow
+      legend_style: *map_legend
+      max_zoom: 15
+      view_state: *conservancy_view
+  - name: Save Days Since Visit Map
+    id: coverage_map_html
+    task: persist_text
+    partial:
+      text: ${{ workflow.coverage_map.return }}
+      root_path: ${{ env.ECOSCOPE_WORKFLOWS_RESULTS }}
+      filename_suffix: days_since_patrol_visit_map
+  - name: Create Time Since Visit Map Widget
+    id: coverage_map_w
+    task: create_map_widget_single_view
+    skipif:
+      conditions: *id002
+    partial:
+      title: Days Since Patrol Visit (whole period)
+      data: ${{ workflow.coverage_map_html.return }}
+  - name: Calculate Patrol Coverage Fraction
+    id: patrol_effort_spatial
+    task: ecoscope_workflows_ext_mep.tasks.transformation.compute_patrol_effort_fraction
+    partial:
+      gdf: ${{ workflow.add_visit_bin_colors.return }}
+  - name: Format Patrol Coverage as Percentage
+    id: patrol_effort_quantity
+    task: to_quantity
+    partial:
+      value: ${{ workflow.patrol_effort_spatial.return }}
+      unit: '%'
+  - name: Create Patrol Coverage Widget
+    id: coverage_sv
+    task: create_single_value_widget_single_view
+    skipif:
+      conditions: *id002
+    partial:
+      title: Patrol Coverage (% of conservancy, whole period)
+      decimal_places: 1
+      data: ${{ workflow.patrol_effort_quantity.return }}
+  # The Word report needs the figure as a table cell, and no task turns a
+  # number into text, so the report card reads the same visited flag
+  # compute_patrol_effort_fraction counts ("fraction of grid with >= 1
+  # visit", patrol-field-effort technical guide): visited cells / all cells.
+  - name: Coverage Cards
+    id: coverage_cards
+    task: apply_sql_query
+    partial:
+      df: ${{ workflow.add_null_flag.return }}
+      query: |
+        SELECT printf('%.1f%%', 100.0 * SUM(CASE WHEN visited THEN 1 ELSE 0 END) / COUNT(*)) AS "Conservancy patrolled",
+               printf('%d of %d', SUM(CASE WHEN visited THEN 1 ELSE 0 END), COUNT(*)) AS "1 km grid cells patrolled"
+        FROM df
+      columns: null
+      sanitize: true
+- title: Encounter Rates
+  type: task-group
+  description: Wildlife and illegal activity per km patrolled (patrol-encounter-rate-map).
+  tasks:
+  # ENCOUNTER RATES. Review 2: "add encounter rate maps (events per km
+  # patrolled) for Wildlife Sightings (sum of number of animals) and Illegal
+  # Activity, using patrol-encounter-rate-map. Count only events recorded on
+  # patrol, and keep the minimum-effort greying."
+  #
+  # This is patrol-encounter-rate-map's "Encounter Rate Map" task group,
+  # copied task for task from its v2.0.0 release (commit 42fb25a, the last
+  # release on ext-custom 0.1.5; later releases need ecoscope-platform 2.30,
+  # which ext-custom 0.1.5 cannot be installed with). Same tasks, same
+  # parameters, same Map Options form, once per map. Only the inputs differ:
+  #   - events: the report's own events, kept to those attached to a patrol
+  #     in ER and with a usable location. They already carry the field to
+  #     sum, so that workflow's steps that fetch it from the event details
+  #     and merge it back (details_agg_subset, pe_groups_with_agg) are not
+  #     needed;
+  #   - tracks: Tracks Inside the Period -- capped at 14 h and through the
+  #     trajectory filter -- so an open patrol or a GPS jump cannot add
+  #     kilometres to a cell (review 2: "Before either: apply the 14 h cap
+  #     and a trajectory speed filter ... so open patrols and GPS jumps don't
+  #     create false hotspots or inflate effort");
+  #   - no grouping: one map for the whole period, which is what that
+  #     workflow produces with no grouper set (its groupbykey / mapvalues /
+  #     merge_widget_views steps reduce to single calls);
+  #   - the map adds the conservancy boundary and the report's fixed view,
+  #     like every other map in the report.
+  - name: Wildlife Sightings on Patrol
+    id: wl_er_events
+    task: apply_sql_query
+    partial:
+      df: ${{ workflow.events_indexed.return }}
+      # Animals counted on visual sightings; spoor and dung count 0, as in
+      # the priority species maps.
+      query: |
+        SELECT id, geometry,
+               CASE WHEN json_extract(event_details, '$."Sighting type"') = 'Visual'
+                    THEN COALESCE(CAST(json_extract(event_details, '$."Total Individuals"') AS REAL), 0) ELSE 0 END AS "Total Individuals"
+        FROM df
+        WHERE counted = 1 AND event_type = 'wildlife_sighting'
+          AND COALESCE(json_array_length(patrols), 0) > 0
+          AND geometry IS NOT NULL AND geometry <> 'POINT (0 0)'
+      columns: null
+      sanitize: true
+  - name: Illegal Activity on Patrol
+    id: ia_er_events
+    task: apply_sql_query
+    partial:
+      df: ${{ workflow.events_indexed.return }}
+      query: |
+        SELECT id, geometry
+        FROM df
+        WHERE counted = 1 AND event_type_display = 'Illegal Activity'
+          AND COALESCE(json_array_length(patrols), 0) > 0
+          AND geometry IS NOT NULL AND geometry <> 'POINT (0 0)'
+      columns: null
+      sanitize: true
+- title: Wildlife Encounter Rate Map
+  type: task-group
+  description: >-
+    These settings generate a grid-based heatmap showing encounter rate (events per unit of patrol effort in each cell).
+  tasks:
+  - name: Map Options
+    id: wl_map_options
+    task: ecoscope_workflows_ext_custom.tasks.config.set_encounter_rate_map_options
+    partial:
+      intersecting_only: true
+  - name: Aggregate Column Value
+    id: wl_agg_column
+    task: ecoscope_workflows_ext_custom.tasks.config.get_agg_column_from_map_options
+    partial:
+      options: ${{ workflow.wl_map_options.return }}
+  - name: Map Base Layers
+    id: wl_base_map_defs
+    task: ecoscope_workflows_ext_custom.tasks.config.get_base_maps_from_map_options
+    partial:
+      options: ${{ workflow.wl_map_options.return }}
+  - name: null
+    id: wl_encounter_meshgrid
+    task: ecoscope_workflows_ext_custom.tasks.config.call_meshgrid_from_map_options
+    skipif:
+      conditions:
+      - any_is_empty_df
+      - any_dependency_skipped
+      - all_geometry_are_none
+    partial:
+      aoi: ${{ workflow.traj_in.return }}
+      options: ${{ workflow.wl_map_options.return }}
+  - name: Calculate Encounter Rate per Cell
+    id: wl_encounter_rate_grid
+    task: ecoscope_workflows_ext_custom.tasks.spatial_ops.calculate_encounter_rate_grid
+    skipif:
+      conditions:
+      - any_dependency_skipped
+    partial:
+      feature_layers:
+      - ${{ workflow.wl_er_events.return }}
+      - ${{ workflow.traj_in.return }}
+      meshgrid: ${{ workflow.wl_encounter_meshgrid.return }}
+      sum_column: ${{ workflow.wl_agg_column.return }}
+  - name: Drop Inactive Grid Cells
+    id: wl_drop_inactive_cells
+    task: ecoscope_workflows_ext_custom.tasks.spatial_ops.drop_inactive_grid_cells
+    partial:
+      df: ${{ workflow.wl_encounter_rate_grid.return }}
+      event_column: event_count
+      patrol_effort_column: patrol_effort_km
+  - name: Fill NaN Encounter Rate With Zero
+    id: wl_fill_nan_rate
+    task: fill_na
+    partial:
+      df: ${{ workflow.wl_drop_inactive_cells.return }}
+      columns: [density]
+      value: 0
+  - name: Sort Encounter Rate Values
+    id: wl_sort_rate_values
+    task: sort_values
+    partial:
+      df: ${{ workflow.wl_fill_nan_rate.return }}
+      column_name: density
+      ascending: true
+      na_position: last
+  - name: Classify Encounter Rate Values
+    id: wl_classify_rate
+    task: apply_classification
+    partial:
+      df: ${{ workflow.wl_sort_rate_values.return }}
+      input_column_name: density
+      output_column_name: rate_bins
+      classification_options:
+        scheme: equal_interval
+        k: 10
+      label_options:
+        label_ranges: true
+        label_decimals: 2
+  - name: Encounter Rate Colormap
+    id: wl_rate_colormap
+    task: apply_color_map
+    partial:
+      df: ${{ workflow.wl_classify_rate.return }}
+      input_column_name: rate_bins
+      colormap: RdYlGn_r
+      output_column_name: rate_colormap
+  - name: Mask Threshold
+    id: wl_mask_threshold
+    task: ecoscope_workflows_ext_custom.tasks.config.get_mask_threshold_from_map_options
+    partial:
+      options: ${{ workflow.wl_map_options.return }}
+  - name: Mask Low-Effort Cells Grey
+    id: wl_mask_low_effort
+    task: ecoscope_workflows_ext_custom.tasks.spatial_ops.mask_low_effort_cells
+    partial:
+      df: ${{ workflow.wl_rate_colormap.return }}
+      patrol_effort_column: patrol_effort_km
+      color_column: rate_colormap
+      label_column: rate_bins
+      threshold_km: ${{ workflow.wl_mask_threshold.return }}
+      grey_color: [128, 128, 128, 255]
+      grey_label: < 200 m patrol effort
+  - name: Rate Numerator Label
+    id: wl_rate_numerator_label
+    task: default_if_string_is_empty
+    partial:
+      value: ${{ workflow.wl_agg_column.return }}
+      default: Events
+  - name: Rate Column Label
+    id: wl_rate_col_label
+    task: concat_string_vars
+    partial:
+      values:
+      - ${{ workflow.wl_rate_numerator_label.return }}
+      - ' per km'
+  - id: wl_rename_rate_col
+    task: map_columns
+    partial:
+      df: ${{ workflow.wl_mask_low_effort.return }}
+      drop_columns: []
+      retain_columns: []
+      rename_columns:
+        density: ${{ workflow.wl_rate_col_label.return }}
+        event_count: Events
+        event_sum: ${{ workflow.wl_rate_numerator_label.return }}
+        patrol_effort_km: Patrol Effort (km)
+      duplicate_strategy: suffix
+      raise_if_not_found: false
+  - name: Format Rate Tooltip
+    id: wl_format_rate_tooltip
+    task: map_values_with_unit
+    partial:
+      df: ${{ workflow.wl_rename_rate_col.return }}
+      input_column_name: ${{ workflow.wl_rate_col_label.return }}
+      output_column_name: ${{ workflow.wl_rate_col_label.return }}
+      original_unit: null
+      new_unit: null
+      decimal_places: 2
+  - name: Format Effort Tooltip
+    id: wl_format_effort_tooltip
+    task: map_values_with_unit
+    partial:
+      df: ${{ workflow.wl_format_rate_tooltip.return }}
+      input_column_name: Patrol Effort (km)
+      output_column_name: Patrol Effort (km)
+      original_unit: null
+      new_unit: null
+      decimal_places: 2
+  - name: Create Encounter Rate Polygon Layer
+    id: wl_rate_polygon_layer
+    task: create_polygon_layer
+    skipif:
+      conditions:
+      - any_is_empty_df
+      - any_dependency_skipped
+      - all_geometry_are_none
+    partial:
+      geodataframe: ${{ workflow.wl_format_effort_tooltip.return }}
+      layer_style:
+        fill_color_column: rate_colormap
+        get_line_width: 0
+        opacity: 0.4
+      legend:
+        label_column: rate_bins
+        color_column: rate_colormap
+      tooltip_columns:
+      - ${{ workflow.wl_rate_col_label.return }}
+      - ${{ workflow.wl_rate_numerator_label.return }}
+      - Patrol Effort (km)
+  - name: Draw Encounter Rate Ecomap
+    id: wl_er_map
+    task: draw_ecomap
+    partial:
+      geo_layers:
+      - ${{ workflow.wl_rate_polygon_layer.return }}
+      - ${{ workflow.boundary_layer.return }}
+      title: null
+      tile_layers: ${{ workflow.wl_base_map_defs.return }}
+      north_arrow_style:
+        placement: top-left
+      legend_style:
+        title: ${{ workflow.wl_rate_col_label.return }}
+        format_title: false
+        placement: bottom-right
+      static: false
+      max_zoom: 20
+      view_state: *conservancy_view
+      widget_id: Wildlife Encounter Rate Map (whole period)
+  - name: Persist Encounter Rate Ecomap
+    id: wl_er_map_html
+    task: persist_text
+    partial:
+      text: ${{ workflow.wl_er_map.return }}
+      root_path: ${{ env.ECOSCOPE_WORKFLOWS_RESULTS }}
+      filename_suffix: wildlife_encounter_rate_map
+  - name: Create Encounter Rate Map Widget
+    id: wl_er_map_w
+    task: create_map_widget_single_view
+    skipif:
+      conditions: *id002
+    partial:
+      title: Wildlife Encounter Rate Map (whole period)
+      data: ${{ workflow.wl_er_map_html.return }}
+- title: Illegal Activity Encounter Rate Map
+  type: task-group
+  description: >-
+    These settings generate a grid-based heatmap showing encounter rate (events per unit of patrol effort in each cell).
+  tasks:
+  - name: Map Options
+    id: ia_map_options
+    task: ecoscope_workflows_ext_custom.tasks.config.set_encounter_rate_map_options
+    partial:
+      intersecting_only: true
+  - name: Aggregate Column Value
+    id: ia_agg_column
+    task: ecoscope_workflows_ext_custom.tasks.config.get_agg_column_from_map_options
+    partial:
+      options: ${{ workflow.ia_map_options.return }}
+  - name: Map Base Layers
+    id: ia_base_map_defs
+    task: ecoscope_workflows_ext_custom.tasks.config.get_base_maps_from_map_options
+    partial:
+      options: ${{ workflow.ia_map_options.return }}
+  - name: null
+    id: ia_encounter_meshgrid
+    task: ecoscope_workflows_ext_custom.tasks.config.call_meshgrid_from_map_options
+    skipif:
+      conditions:
+      - any_is_empty_df
+      - any_dependency_skipped
+      - all_geometry_are_none
+    partial:
+      aoi: ${{ workflow.traj_in.return }}
+      options: ${{ workflow.ia_map_options.return }}
+  - name: Calculate Encounter Rate per Cell
+    id: ia_encounter_rate_grid
+    task: ecoscope_workflows_ext_custom.tasks.spatial_ops.calculate_encounter_rate_grid
+    skipif:
+      conditions:
+      - any_dependency_skipped
+    partial:
+      feature_layers:
+      - ${{ workflow.ia_er_events.return }}
+      - ${{ workflow.traj_in.return }}
+      meshgrid: ${{ workflow.ia_encounter_meshgrid.return }}
+      sum_column: ${{ workflow.ia_agg_column.return }}
+  - name: Drop Inactive Grid Cells
+    id: ia_drop_inactive_cells
+    task: ecoscope_workflows_ext_custom.tasks.spatial_ops.drop_inactive_grid_cells
+    partial:
+      df: ${{ workflow.ia_encounter_rate_grid.return }}
+      event_column: event_count
+      patrol_effort_column: patrol_effort_km
+  - name: Fill NaN Encounter Rate With Zero
+    id: ia_fill_nan_rate
+    task: fill_na
+    partial:
+      df: ${{ workflow.ia_drop_inactive_cells.return }}
+      columns: [density]
+      value: 0
+  - name: Sort Encounter Rate Values
+    id: ia_sort_rate_values
+    task: sort_values
+    partial:
+      df: ${{ workflow.ia_fill_nan_rate.return }}
+      column_name: density
+      ascending: true
+      na_position: last
+  - name: Classify Encounter Rate Values
+    id: ia_classify_rate
+    task: apply_classification
+    partial:
+      df: ${{ workflow.ia_sort_rate_values.return }}
+      input_column_name: density
+      output_column_name: rate_bins
+      classification_options:
+        scheme: equal_interval
+        k: 10
+      label_options:
+        label_ranges: true
+        label_decimals: 2
+  - name: Encounter Rate Colormap
+    id: ia_rate_colormap
+    task: apply_color_map
+    partial:
+      df: ${{ workflow.ia_classify_rate.return }}
+      input_column_name: rate_bins
+      colormap: RdYlGn_r
+      output_column_name: rate_colormap
+  - name: Mask Threshold
+    id: ia_mask_threshold
+    task: ecoscope_workflows_ext_custom.tasks.config.get_mask_threshold_from_map_options
+    partial:
+      options: ${{ workflow.ia_map_options.return }}
+  - name: Mask Low-Effort Cells Grey
+    id: ia_mask_low_effort
+    task: ecoscope_workflows_ext_custom.tasks.spatial_ops.mask_low_effort_cells
+    partial:
+      df: ${{ workflow.ia_rate_colormap.return }}
+      patrol_effort_column: patrol_effort_km
+      color_column: rate_colormap
+      label_column: rate_bins
+      threshold_km: ${{ workflow.ia_mask_threshold.return }}
+      grey_color: [128, 128, 128, 255]
+      grey_label: < 200 m patrol effort
+  - name: Rate Numerator Label
+    id: ia_rate_numerator_label
+    task: default_if_string_is_empty
+    partial:
+      value: ${{ workflow.ia_agg_column.return }}
+      default: Events
+  - name: Rate Column Label
+    id: ia_rate_col_label
+    task: concat_string_vars
+    partial:
+      values:
+      - ${{ workflow.ia_rate_numerator_label.return }}
+      - ' per km'
+  - id: ia_rename_rate_col
+    task: map_columns
+    partial:
+      df: ${{ workflow.ia_mask_low_effort.return }}
+      drop_columns: []
+      retain_columns: []
+      rename_columns:
+        density: ${{ workflow.ia_rate_col_label.return }}
+        event_count: Events
+        event_sum: ${{ workflow.ia_rate_numerator_label.return }}
+        patrol_effort_km: Patrol Effort (km)
+      duplicate_strategy: suffix
+      raise_if_not_found: false
+  - name: Format Rate Tooltip
+    id: ia_format_rate_tooltip
+    task: map_values_with_unit
+    partial:
+      df: ${{ workflow.ia_rename_rate_col.return }}
+      input_column_name: ${{ workflow.ia_rate_col_label.return }}
+      output_column_name: ${{ workflow.ia_rate_col_label.return }}
+      original_unit: null
+      new_unit: null
+      decimal_places: 2
+  - name: Format Effort Tooltip
+    id: ia_format_effort_tooltip
+    task: map_values_with_unit
+    partial:
+      df: ${{ workflow.ia_format_rate_tooltip.return }}
+      input_column_name: Patrol Effort (km)
+      output_column_name: Patrol Effort (km)
+      original_unit: null
+      new_unit: null
+      decimal_places: 2
+  - name: Create Encounter Rate Polygon Layer
+    id: ia_rate_polygon_layer
+    task: create_polygon_layer
+    skipif:
+      conditions:
+      - any_is_empty_df
+      - any_dependency_skipped
+      - all_geometry_are_none
+    partial:
+      geodataframe: ${{ workflow.ia_format_effort_tooltip.return }}
+      layer_style:
+        fill_color_column: rate_colormap
+        get_line_width: 0
+        opacity: 0.4
+      legend:
+        label_column: rate_bins
+        color_column: rate_colormap
+      tooltip_columns:
+      - ${{ workflow.ia_rate_col_label.return }}
+      - ${{ workflow.ia_rate_numerator_label.return }}
+      - Patrol Effort (km)
+  - name: Draw Encounter Rate Ecomap
+    id: ia_er_map
+    task: draw_ecomap
+    partial:
+      geo_layers:
+      - ${{ workflow.ia_rate_polygon_layer.return }}
+      - ${{ workflow.boundary_layer.return }}
+      title: null
+      tile_layers: ${{ workflow.ia_base_map_defs.return }}
+      north_arrow_style:
+        placement: top-left
+      legend_style:
+        title: ${{ workflow.ia_rate_col_label.return }}
+        format_title: false
+        placement: bottom-right
+      static: false
+      max_zoom: 20
+      view_state: *conservancy_view
+      widget_id: Illegal Activity Encounter Rate Map (whole period)
+  - name: Persist Encounter Rate Ecomap
+    id: ia_er_map_html
+    task: persist_text
+    partial:
+      text: ${{ workflow.ia_er_map.return }}
+      root_path: ${{ env.ECOSCOPE_WORKFLOWS_RESULTS }}
+      filename_suffix: illegal_activity_encounter_rate_map
+  - name: Create Encounter Rate Map Widget
+    id: ia_er_map_w
+    task: create_map_widget_single_view
+    skipif:
+      conditions: *id002
+    partial:
+      title: Illegal Activity Encounter Rate Map (whole period)
+      data: ${{ workflow.ia_er_map_html.return }}
 - title: Event Summary
   type: task-group
   description: Event totals and types (Logistics and Household Survey excluded).
@@ -1472,21 +2409,34 @@ workflow:
     mapvalues:
       argnames: df
       argvalues: ${{ workflow.event_type_counts.return }}
-  - name: Draw Event Types Pie
-    id: event_type_pie
-    task: draw_pie_chart
+  # A HORIZONTAL BAR, not a pie. Review 2: "Fig. 3: Change the pie for a
+  # horizontal bar chart, as agreed previously. The labels pile up, and the
+  # legend is clipped with a scrollbar ('Crop Damage' is cut off)." ext-wd's
+  # draw_events_by_type_chart: one bar per event type, largest on top, every
+  # type labelled on the axis (no legend to clip), each bar labelled
+  # "count (share%)", whole-number ticks. It counts one row per event and
+  # takes each bar's colour from type_color, a hex string here -- the same
+  # event_type_colors map as everywhere else, written out as a CASE because
+  # apply_color_map gives RGBA tuples, which plotly bars do not accept.
+  - name: Event Type Rows
+    id: event_type_rows
+    task: apply_sql_query
     partial:
-      value_column: Events
-      label_column: Event type
-      color_column: type_color
-      plot_style:
-        textinfo: value+percent
-      layout_style:
-        showlegend: true
-        legend_title: Event type
+      query: |
+        SELECT id, event_type_display,
+               CASE type_key WHEN 'HWC Livestock Predation' THEN '#3e35a3' WHEN 'Crop Damage' THEN '#b62879' WHEN 'Infrastructure Damage' THEN '#ff803e' WHEN 'Human Injury' THEN '#ed3ea2' WHEN 'Human Death' THEN '#8c1700' WHEN 'Wildlife Sighting' THEN '#004e26' WHEN 'Animal Carcass' THEN '#002960' WHEN 'Sick / Injured Animal' THEN '#3089ff' WHEN 'HWC Threat' THEN '#f4a261' WHEN 'HWC Mitigation Response' THEN '#e9c46a' WHEN 'HWC Retaliation' THEN '#9d0208' WHEN 'Illegal Activity' THEN '#f23b0e' WHEN 'Theft' THEN '#2a9d8f' WHEN 'Snares & Traps' THEN '#bc6c25' WHEN 'Poacher Camp' THEN '#577590' WHEN 'Poacher Spoor (Human & Vehicle)' THEN '#6d597a' WHEN 'Gunshot' THEN '#343a40' WHEN 'Arrest' THEN '#0081a7' WHEN 'Contact (human-human)' THEN '#d81159' WHEN 'Poisoning' THEN '#a100cb' WHEN 'Recovered trophy' THEN '#8338ec' WHEN 'Rainfall Report' THEN '#6a994e' ELSE '#8a8f98' END AS type_color
+        FROM df WHERE counted = 1
+      columns: null
+      sanitize: true
     mapvalues:
-      argnames: dataframe
-      argvalues: ${{ workflow.event_type_cmap.return }}
+      argnames: df
+      argvalues: ${{ workflow.events_grouped.return }}
+  - name: Draw Event Types Bar
+    id: event_type_pie
+    task: draw_events_by_type_chart
+    mapvalues:
+      argnames: df
+      argvalues: ${{ workflow.event_type_rows.return }}
   - name: Persist Event Types Chart
     id: event_type_pie_html
     task: persist_text
@@ -1586,11 +2536,16 @@ workflow:
     partial:
       widgets: ${{ workflow.wildlife_tbl_w.return }}
   # SQL notes:
-  # Symbol AREA is proportional to the count (radius grows with its square
-  # root), so a herd of 40 reads as 40 times one animal, not 40 times as
-  # wide. "Species group" folds the long tail into 'Other species' so the
+  # A POINT MAP. Review 2: "Fig. 4: can we change this to a point map? I think
+  # the proportional symbols make it cluttered and it has no size legend."
+  # Every sighting is now one dot of the same size, coloured by species; the
+  # animals counted are in the tooltip, and the priority species maps carry
+  # the sized symbols. "Species group" folds the long tail into 'Other species' so the
   # legend stays readable and each named species keeps one colour in
-  # every map (the species_colors map).
+  # every map (the species_colors map). color_key is "Species group" without
+  # apostrophes: wt-compiler 0.8.3 writes colormap keys into the generated
+  # Python inside single quotes without escaping them, so a key like
+  # "Grevy's Zebra" breaks the build. Names shown on maps keep the apostrophe.
   - name: Wildlife Points
     id: wildlife_points
     task: apply_sql_query
@@ -1599,8 +2554,11 @@ workflow:
         SELECT geometry,
                COALESCE(animal_h, 'Not recorded') AS "Species",
                CASE WHEN animal_h IN ('Elephant', 'Lion', 'Leopard', 'Wild Dog', 'Cheetah', 'Reticulated Giraffe',
-                      'Grevys Zebra', 'Burchells Zebra', 'Impala', 'Spotted Hyena', 'Striped Hyena', 'Gerenuk',
+                      'Grevy''s Zebra', 'Burchell''s Zebra', 'Impala', 'Spotted Hyena', 'Striped Hyena', 'Gerenuk',
                       'Eland', 'Buffalo') THEN animal_h ELSE 'Other species' END AS "Species group",
+               REPLACE(CASE WHEN animal_h IN ('Elephant', 'Lion', 'Leopard', 'Wild Dog', 'Cheetah', 'Reticulated Giraffe',
+                      'Grevy''s Zebra', 'Burchell''s Zebra', 'Impala', 'Spotted Hyena', 'Striped Hyena', 'Gerenuk',
+                      'Eland', 'Buffalo') THEN animal_h ELSE 'Other species' END, '''', '') AS color_key,
                CAST(COALESCE(CAST(json_extract(event_details, '$."Total Individuals"') AS REAL), 0) AS INTEGER) AS "Individuals",
                COALESCE(json_extract(event_details, '$."Sighting type"'), 'Not recorded') AS "Sighting type",
                substr(report_time, 1, 16) AS "Date",
@@ -1616,7 +2574,7 @@ workflow:
     id: wildlife_cmap
     task: apply_color_map
     partial:
-      input_column_name: Species group
+      input_column_name: color_key
       colormap: &species_colors
         Elephant: '#3e35a3'
         Lion: '#f23b0e'
@@ -1644,7 +2602,7 @@ workflow:
       conditions: *id003
     partial:
       layer_style:
-        get_radius: radius
+        get_radius: 6.0
         radius_units: pixels
         fill_color_column: wildlife_color
         get_line_color: '#ffffff'
@@ -1711,14 +2669,25 @@ workflow:
     task: merge_widget_views
     partial:
       widgets: ${{ workflow.wildlife_map_w.return }}
-  # PROPORTIONAL SPECIES MAP. Review: "Implement maps with symbol sizes
-  # representing the number of individuals observed. Ideally, allow users to
-  # select up to five species during report configuration." The species come
-  # from the Priority Species form field (default Elephant, Lion, Wild Dog,
-  # Leopard). Visual sightings with a count only: a symbol sized by spoor would
-  # be sized by nothing. One map with every selected species, each in its fixed
-  # species colour, rather than one map per species: the number of maps would
-  # otherwise depend on the form, and the Word template needs a fixed layout.
+  # PRIORITY SPECIES: ONE MAP PER SPECIES, SIZED BY ANIMALS COUNTED.
+  #
+  # Review 1: "Implement maps with symbol sizes representing the number of
+  # individuals observed. Ideally, allow users to select up to five species
+  # during report configuration." Review 2: "Fig. 5 (priority species): Can
+  # we change to a map per species please? Add a size legend."
+  #
+  # The species come from the Priority Species form field (up to five;
+  # default Elephant, Lion, Wild Dog, Leopard). There are five fixed map
+  # slots: slot n shows the n-th species chosen, and a slot with no species
+  # (fewer than five chosen) filters to nothing, so its map is skipped and the
+  # Word report leaves it out. Visual sightings with a count only.
+  #
+  # SIZE LEGEND: draw_ecomap's legend draws colour swatches, not sizes, so the
+  # sizes are four fixed bands a text legend can name exactly -- 1, 2 to 5, 6
+  # to 20, more than 20 animals -- at 5, 8, 12 and 17 px. The legend is a
+  # second, titled box carried by an invisible layer (Priority Species Size
+  # Key: one point at zero opacity), the same device as the HWC report's
+  # predation map.
   - name: Priority Species Points
     id: priority_points
     task: apply_sql_query
@@ -1727,11 +2696,17 @@ workflow:
         SELECT geometry,
                animal_h AS "Species",
                CASE WHEN animal_h IN ('Elephant', 'Lion', 'Leopard', 'Wild Dog', 'Cheetah', 'Reticulated Giraffe',
-                      'Grevys Zebra', 'Burchells Zebra', 'Impala', 'Spotted Hyena', 'Striped Hyena', 'Gerenuk',
+                      'Grevy''s Zebra', 'Burchell''s Zebra', 'Impala', 'Spotted Hyena', 'Striped Hyena', 'Gerenuk',
                       'Eland', 'Buffalo') THEN animal_h ELSE 'Other species' END AS "Species group",
+               REPLACE(CASE WHEN animal_h IN ('Elephant', 'Lion', 'Leopard', 'Wild Dog', 'Cheetah', 'Reticulated Giraffe',
+                      'Grevy''s Zebra', 'Burchell''s Zebra', 'Impala', 'Spotted Hyena', 'Striped Hyena', 'Gerenuk',
+                      'Eland', 'Buffalo') THEN animal_h ELSE 'Other species' END, '''', '') AS color_key,
                CAST(CAST(json_extract(event_details, '$."Total Individuals"') AS REAL) AS INTEGER) AS "Individuals",
                substr(report_time, 1, 16) AS "Date",
-               3 + 3 * sqrt(CAST(json_extract(event_details, '$."Total Individuals"') AS REAL)) AS radius
+               CASE WHEN CAST(json_extract(event_details, '$."Total Individuals"') AS REAL) > 20 THEN 17
+                    WHEN CAST(json_extract(event_details, '$."Total Individuals"') AS REAL) > 5 THEN 12
+                    WHEN CAST(json_extract(event_details, '$."Total Individuals"') AS REAL) > 1 THEN 8
+                    ELSE 5 END AS size_px
         FROM df WHERE event_type = 'wildlife_sighting' AND counted = 1
           AND json_extract(event_details, '$."Sighting type"') = 'Visual'
           AND COALESCE(CAST(json_extract(event_details, '$."Total Individuals"') AS REAL), 0) > 0
@@ -1742,40 +2717,86 @@ workflow:
     mapvalues:
       argnames: df
       argvalues: ${{ workflow.events_grouped.return }}
-  - name: Keep Priority Species
-    id: priority_filtered
+  - name: Priority Species Size Key Point
+    id: priority_size_pt
+    task: apply_sql_query
+    skipif:
+      conditions: *id002
+    partial:
+      df: ${{ workflow.events_safe.return }}
+      query: |
+        SELECT 'POINT (36.98 0.53)' AS geometry FROM (SELECT 1)
+      columns: null
+      sanitize: true
+  - name: Priority Species Size Key
+    id: priority_size_key
+    task: create_point_layer
+    partial:
+      geodataframe: ${{ workflow.priority_size_pt.return }}
+      layer_style:
+        get_radius: 0.0
+        radius_units: pixels
+        get_fill_color: '#525252'
+        stroked: false
+        opacity: 0.0
+        pickable: false
+      legend:
+        title: Animals counted (point size)
+        labels: ['Smallest: 1', 'Small: 2 to 5', 'Medium: 6 to 20', 'Large: more than 20']
+        colors: ['#525252', '#525252', '#525252', '#525252']
+      tooltip_columns: []
+  - name: Priority Species 1
+    id: ps1_name
+    task: get_collection_item
+    partial:
+      collection: ${{ workflow.priority_species.return }}
+      key: 0
+      default: (not selected)
+      raise_on_missing: false
+  - name: Priority Species 1 Title
+    id: ps1_title
+    task: concat_string_vars
+    partial:
+      values:
+      - 'Priority species: '
+      - ${{ workflow.ps1_name.return }}
+  - name: Priority Species 1 Sightings
+    id: ps1_pts
     task: filter_row_values
     partial:
       column: Species
-      values: ${{ workflow.priority_species.return }}
+      values:
+      - ${{ workflow.ps1_name.return }}
     mapvalues:
       argnames: df
       argvalues: ${{ workflow.priority_points.return }}
-  - name: Priority Species Colours
-    id: priority_cmap
+  - name: Priority Species 1 Colours
+    id: ps1_cmap
     task: apply_color_map
     partial:
-      input_column_name: Species group
+      input_column_name: color_key
       colormap: *species_colors
       output_column_name: species_color
     mapvalues:
       argnames: df
-      argvalues: ${{ workflow.priority_filtered.return }}
-  - name: Priority Species Point Layer
-    id: priority_layer
+      argvalues: ${{ workflow.ps1_pts.return }}
+  - name: Priority Species 1 Layer
+    id: ps1_layer
     task: create_point_layer
     skipif:
       conditions: *id003
     partial:
       layer_style:
-        get_radius: radius
+        get_radius: size_px
         radius_units: pixels
+        radius_scale: 1.0
         fill_color_column: species_color
         get_line_color: '#ffffff'
         stroked: true
         get_line_width: 1
-        opacity: 0.75
+        opacity: 0.8
       legend:
+        title: Species
         label_column: Species
         color_column: species_color
       tooltip_columns:
@@ -1784,17 +2805,19 @@ workflow:
       - Date
     mapvalues:
       argnames: geodataframe
-      argvalues: ${{ workflow.priority_cmap.return }}
-  - name: Priority Species Map Layers
-    id: priority_map_layers
+      argvalues: ${{ workflow.ps1_cmap.return }}
+  - name: Priority Species 1 Map Layers
+    id: ps1_map_layers
     task: combine_map_layers
     partial:
-      static_layers: ${{ workflow.boundary_layer.return }}
+      static_layers:
+      - ${{ workflow.boundary_layer.return }}
+      - ${{ workflow.priority_size_key.return }}
     mapvalues:
       argnames: grouped_layers
-      argvalues: ${{ workflow.priority_layer.return }}
-  - name: Draw Priority Species Map
-    id: priority_map
+      argvalues: ${{ workflow.ps1_layer.return }}
+  - name: Draw Priority Species 1 Map
+    id: ps1_map
     task: draw_ecomap
     partial:
       tile_layers: ${{ workflow.base_map_defs.return }}
@@ -1806,33 +2829,492 @@ workflow:
       view_state: *conservancy_view
     mapvalues:
       argnames: geo_layers
-      argvalues: ${{ workflow.priority_map_layers.return }}
-  - name: Persist Priority Species Map
-    id: priority_map_html
+      argvalues: ${{ workflow.ps1_map_layers.return }}
+  - name: Persist Priority Species 1 Map
+    id: ps1_map_html
     task: persist_text
     partial:
       root_path: ${{ env.ECOSCOPE_WORKFLOWS_RESULTS }}
-      filename_suffix: priority_species_map
+      filename_suffix: priority_species_map_1
     mapvalues:
       argnames: text
-      argvalues: ${{ workflow.priority_map.return }}
+      argvalues: ${{ workflow.ps1_map.return }}
+  - name: Priority Species 2
+    id: ps2_name
+    task: get_collection_item
+    partial:
+      collection: ${{ workflow.priority_species.return }}
+      key: 1
+      default: (not selected)
+      raise_on_missing: false
+  - name: Priority Species 2 Title
+    id: ps2_title
+    task: concat_string_vars
+    partial:
+      values:
+      - 'Priority species: '
+      - ${{ workflow.ps2_name.return }}
+  - name: Priority Species 2 Sightings
+    id: ps2_pts
+    task: filter_row_values
+    partial:
+      column: Species
+      values:
+      - ${{ workflow.ps2_name.return }}
+    mapvalues:
+      argnames: df
+      argvalues: ${{ workflow.priority_points.return }}
+  - name: Priority Species 2 Colours
+    id: ps2_cmap
+    task: apply_color_map
+    partial:
+      input_column_name: color_key
+      colormap: *species_colors
+      output_column_name: species_color
+    mapvalues:
+      argnames: df
+      argvalues: ${{ workflow.ps2_pts.return }}
+  - name: Priority Species 2 Layer
+    id: ps2_layer
+    task: create_point_layer
+    skipif:
+      conditions: *id003
+    partial:
+      layer_style:
+        get_radius: size_px
+        radius_units: pixels
+        radius_scale: 1.0
+        fill_color_column: species_color
+        get_line_color: '#ffffff'
+        stroked: true
+        get_line_width: 1
+        opacity: 0.8
+      legend:
+        title: Species
+        label_column: Species
+        color_column: species_color
+      tooltip_columns:
+      - Species
+      - Individuals
+      - Date
+    mapvalues:
+      argnames: geodataframe
+      argvalues: ${{ workflow.ps2_cmap.return }}
+  - name: Priority Species 2 Map Layers
+    id: ps2_map_layers
+    task: combine_map_layers
+    partial:
+      static_layers:
+      - ${{ workflow.boundary_layer.return }}
+      - ${{ workflow.priority_size_key.return }}
+    mapvalues:
+      argnames: grouped_layers
+      argvalues: ${{ workflow.ps2_layer.return }}
+  - name: Draw Priority Species 2 Map
+    id: ps2_map
+    task: draw_ecomap
+    partial:
+      tile_layers: ${{ workflow.base_map_defs.return }}
+      static: false
+      title: null
+      north_arrow_style: *map_arrow
+      legend_style: *map_legend
+      max_zoom: 15
+      view_state: *conservancy_view
+    mapvalues:
+      argnames: geo_layers
+      argvalues: ${{ workflow.ps2_map_layers.return }}
+  - name: Persist Priority Species 2 Map
+    id: ps2_map_html
+    task: persist_text
+    partial:
+      root_path: ${{ env.ECOSCOPE_WORKFLOWS_RESULTS }}
+      filename_suffix: priority_species_map_2
+    mapvalues:
+      argnames: text
+      argvalues: ${{ workflow.ps2_map.return }}
+  - name: Priority Species 3
+    id: ps3_name
+    task: get_collection_item
+    partial:
+      collection: ${{ workflow.priority_species.return }}
+      key: 2
+      default: (not selected)
+      raise_on_missing: false
+  - name: Priority Species 3 Title
+    id: ps3_title
+    task: concat_string_vars
+    partial:
+      values:
+      - 'Priority species: '
+      - ${{ workflow.ps3_name.return }}
+  - name: Priority Species 3 Sightings
+    id: ps3_pts
+    task: filter_row_values
+    partial:
+      column: Species
+      values:
+      - ${{ workflow.ps3_name.return }}
+    mapvalues:
+      argnames: df
+      argvalues: ${{ workflow.priority_points.return }}
+  - name: Priority Species 3 Colours
+    id: ps3_cmap
+    task: apply_color_map
+    partial:
+      input_column_name: color_key
+      colormap: *species_colors
+      output_column_name: species_color
+    mapvalues:
+      argnames: df
+      argvalues: ${{ workflow.ps3_pts.return }}
+  - name: Priority Species 3 Layer
+    id: ps3_layer
+    task: create_point_layer
+    skipif:
+      conditions: *id003
+    partial:
+      layer_style:
+        get_radius: size_px
+        radius_units: pixels
+        radius_scale: 1.0
+        fill_color_column: species_color
+        get_line_color: '#ffffff'
+        stroked: true
+        get_line_width: 1
+        opacity: 0.8
+      legend:
+        title: Species
+        label_column: Species
+        color_column: species_color
+      tooltip_columns:
+      - Species
+      - Individuals
+      - Date
+    mapvalues:
+      argnames: geodataframe
+      argvalues: ${{ workflow.ps3_cmap.return }}
+  - name: Priority Species 3 Map Layers
+    id: ps3_map_layers
+    task: combine_map_layers
+    partial:
+      static_layers:
+      - ${{ workflow.boundary_layer.return }}
+      - ${{ workflow.priority_size_key.return }}
+    mapvalues:
+      argnames: grouped_layers
+      argvalues: ${{ workflow.ps3_layer.return }}
+  - name: Draw Priority Species 3 Map
+    id: ps3_map
+    task: draw_ecomap
+    partial:
+      tile_layers: ${{ workflow.base_map_defs.return }}
+      static: false
+      title: null
+      north_arrow_style: *map_arrow
+      legend_style: *map_legend
+      max_zoom: 15
+      view_state: *conservancy_view
+    mapvalues:
+      argnames: geo_layers
+      argvalues: ${{ workflow.ps3_map_layers.return }}
+  - name: Persist Priority Species 3 Map
+    id: ps3_map_html
+    task: persist_text
+    partial:
+      root_path: ${{ env.ECOSCOPE_WORKFLOWS_RESULTS }}
+      filename_suffix: priority_species_map_3
+    mapvalues:
+      argnames: text
+      argvalues: ${{ workflow.ps3_map.return }}
+  - name: Priority Species 4
+    id: ps4_name
+    task: get_collection_item
+    partial:
+      collection: ${{ workflow.priority_species.return }}
+      key: 3
+      default: (not selected)
+      raise_on_missing: false
+  - name: Priority Species 4 Title
+    id: ps4_title
+    task: concat_string_vars
+    partial:
+      values:
+      - 'Priority species: '
+      - ${{ workflow.ps4_name.return }}
+  - name: Priority Species 4 Sightings
+    id: ps4_pts
+    task: filter_row_values
+    partial:
+      column: Species
+      values:
+      - ${{ workflow.ps4_name.return }}
+    mapvalues:
+      argnames: df
+      argvalues: ${{ workflow.priority_points.return }}
+  - name: Priority Species 4 Colours
+    id: ps4_cmap
+    task: apply_color_map
+    partial:
+      input_column_name: color_key
+      colormap: *species_colors
+      output_column_name: species_color
+    mapvalues:
+      argnames: df
+      argvalues: ${{ workflow.ps4_pts.return }}
+  - name: Priority Species 4 Layer
+    id: ps4_layer
+    task: create_point_layer
+    skipif:
+      conditions: *id003
+    partial:
+      layer_style:
+        get_radius: size_px
+        radius_units: pixels
+        radius_scale: 1.0
+        fill_color_column: species_color
+        get_line_color: '#ffffff'
+        stroked: true
+        get_line_width: 1
+        opacity: 0.8
+      legend:
+        title: Species
+        label_column: Species
+        color_column: species_color
+      tooltip_columns:
+      - Species
+      - Individuals
+      - Date
+    mapvalues:
+      argnames: geodataframe
+      argvalues: ${{ workflow.ps4_cmap.return }}
+  - name: Priority Species 4 Map Layers
+    id: ps4_map_layers
+    task: combine_map_layers
+    partial:
+      static_layers:
+      - ${{ workflow.boundary_layer.return }}
+      - ${{ workflow.priority_size_key.return }}
+    mapvalues:
+      argnames: grouped_layers
+      argvalues: ${{ workflow.ps4_layer.return }}
+  - name: Draw Priority Species 4 Map
+    id: ps4_map
+    task: draw_ecomap
+    partial:
+      tile_layers: ${{ workflow.base_map_defs.return }}
+      static: false
+      title: null
+      north_arrow_style: *map_arrow
+      legend_style: *map_legend
+      max_zoom: 15
+      view_state: *conservancy_view
+    mapvalues:
+      argnames: geo_layers
+      argvalues: ${{ workflow.ps4_map_layers.return }}
+  - name: Persist Priority Species 4 Map
+    id: ps4_map_html
+    task: persist_text
+    partial:
+      root_path: ${{ env.ECOSCOPE_WORKFLOWS_RESULTS }}
+      filename_suffix: priority_species_map_4
+    mapvalues:
+      argnames: text
+      argvalues: ${{ workflow.ps4_map.return }}
+  - name: Priority Species 5
+    id: ps5_name
+    task: get_collection_item
+    partial:
+      collection: ${{ workflow.priority_species.return }}
+      key: 4
+      default: (not selected)
+      raise_on_missing: false
+  - name: Priority Species 5 Title
+    id: ps5_title
+    task: concat_string_vars
+    partial:
+      values:
+      - 'Priority species: '
+      - ${{ workflow.ps5_name.return }}
+  - name: Priority Species 5 Sightings
+    id: ps5_pts
+    task: filter_row_values
+    partial:
+      column: Species
+      values:
+      - ${{ workflow.ps5_name.return }}
+    mapvalues:
+      argnames: df
+      argvalues: ${{ workflow.priority_points.return }}
+  - name: Priority Species 5 Colours
+    id: ps5_cmap
+    task: apply_color_map
+    partial:
+      input_column_name: color_key
+      colormap: *species_colors
+      output_column_name: species_color
+    mapvalues:
+      argnames: df
+      argvalues: ${{ workflow.ps5_pts.return }}
+  - name: Priority Species 5 Layer
+    id: ps5_layer
+    task: create_point_layer
+    skipif:
+      conditions: *id003
+    partial:
+      layer_style:
+        get_radius: size_px
+        radius_units: pixels
+        radius_scale: 1.0
+        fill_color_column: species_color
+        get_line_color: '#ffffff'
+        stroked: true
+        get_line_width: 1
+        opacity: 0.8
+      legend:
+        title: Species
+        label_column: Species
+        color_column: species_color
+      tooltip_columns:
+      - Species
+      - Individuals
+      - Date
+    mapvalues:
+      argnames: geodataframe
+      argvalues: ${{ workflow.ps5_cmap.return }}
+  - name: Priority Species 5 Map Layers
+    id: ps5_map_layers
+    task: combine_map_layers
+    partial:
+      static_layers:
+      - ${{ workflow.boundary_layer.return }}
+      - ${{ workflow.priority_size_key.return }}
+    mapvalues:
+      argnames: grouped_layers
+      argvalues: ${{ workflow.ps5_layer.return }}
+  - name: Draw Priority Species 5 Map
+    id: ps5_map
+    task: draw_ecomap
+    partial:
+      tile_layers: ${{ workflow.base_map_defs.return }}
+      static: false
+      title: null
+      north_arrow_style: *map_arrow
+      legend_style: *map_legend
+      max_zoom: 15
+      view_state: *conservancy_view
+    mapvalues:
+      argnames: geo_layers
+      argvalues: ${{ workflow.ps5_map_layers.return }}
+  - name: Persist Priority Species 5 Map
+    id: ps5_map_html
+    task: persist_text
+    partial:
+      root_path: ${{ env.ECOSCOPE_WORKFLOWS_RESULTS }}
+      filename_suffix: priority_species_map_5
+    mapvalues:
+      argnames: text
+      argvalues: ${{ workflow.ps5_map.return }}
+  # DASHBOARD: one map for all priority species. The Word report keeps one
+  # map per species (review 2), from the ps1..ps5 maps above; on the
+  # dashboard five more map widgets per view took it to 15 maps, each with
+  # its own WebGL context, and Desktop's browser engine (about 16 contexts)
+  # crashed some of them (21 Nov 2026).
+  - name: All Priority Species Sightings
+    id: psall_pts
+    task: filter_row_values
+    partial:
+      column: Species
+      values: ${{ workflow.priority_species.return }}
+    mapvalues:
+      argnames: df
+      argvalues: ${{ workflow.priority_points.return }}
+  - name: All Priority Species Colours
+    id: psall_cmap
+    task: apply_color_map
+    partial:
+      input_column_name: color_key
+      colormap: *species_colors
+      output_column_name: species_color
+    mapvalues:
+      argnames: df
+      argvalues: ${{ workflow.psall_pts.return }}
+  - name: All Priority Species Layer
+    id: psall_layer
+    task: create_point_layer
+    skipif:
+      conditions: *id003
+    partial:
+      layer_style:
+        get_radius: size_px
+        radius_units: pixels
+        radius_scale: 1.0
+        fill_color_column: species_color
+        get_line_color: '#ffffff'
+        stroked: true
+        get_line_width: 1
+        opacity: 0.8
+      legend:
+        title: Species
+        label_column: Species
+        color_column: species_color
+      tooltip_columns:
+      - Species
+      - Individuals
+      - Date
+    mapvalues:
+      argnames: geodataframe
+      argvalues: ${{ workflow.psall_cmap.return }}
+  - name: All Priority Species Map Layers
+    id: psall_map_layers
+    task: combine_map_layers
+    partial:
+      static_layers:
+      - ${{ workflow.boundary_layer.return }}
+      - ${{ workflow.priority_size_key.return }}
+    mapvalues:
+      argnames: grouped_layers
+      argvalues: ${{ workflow.psall_layer.return }}
+  - name: Draw All Priority Species Map
+    id: psall_map
+    task: draw_ecomap
+    partial:
+      tile_layers: ${{ workflow.base_map_defs.return }}
+      static: false
+      title: null
+      north_arrow_style: *map_arrow
+      legend_style: *map_legend
+      max_zoom: 15
+      view_state: *conservancy_view
+    mapvalues:
+      argnames: geo_layers
+      argvalues: ${{ workflow.psall_map_layers.return }}
+  - name: Persist All Priority Species Map
+    id: psall_map_html
+    task: persist_text
+    partial:
+      root_path: ${{ env.ECOSCOPE_WORKFLOWS_RESULTS }}
+      filename_suffix: priority_species_map_all
+    mapvalues:
+      argnames: text
+      argvalues: ${{ workflow.psall_map.return }}
   - name: Priority Species Map Widget
-    id: priority_map_w
+    id: psall_map_w
     task: create_map_widget_single_view
     skipif:
       conditions: *id002
     partial:
-      title: Priority Species (symbol size = individuals seen)
+      title: Priority Species Sightings
     map:
       argnames:
       - view
       - data
-      argvalues: ${{ workflow.priority_map_html.return }}
+      argvalues: ${{ workflow.psall_map_html.return }}
   - name: Merge Priority Species Map Views
-    id: priority_map_wm
+    id: psall_map_wm
     task: merge_widget_views
     partial:
-      widgets: ${{ workflow.priority_map_w.return }}
+      widgets: ${{ workflow.psall_map_w.return }}
 - title: Animal Health
   type: task-group
   description: Carcass and sick / injured animal reports.
@@ -2161,6 +3643,16 @@ workflow:
   # seen under two types ("Cause not recorded" under Conflict and Unknown in
   # the fifth live run) took one colour for both and the ring stopped showing
   # which type each cause belongs to. The text shown is unchanged.
+  # REVIEW 2: "I love this chart! ... can you make the inner ring (type of
+  # death) match the Fig. 8 map colours, and then use varying shades of that
+  # colour for the causes. Add counts to the slices." Each cause now takes a
+  # shade of its type of death's Fig. 8 colour (darkest first, by cause name),
+  # and both rings carry their count: inner "Conflict (3)", outer "Snare (2)".
+  # The INNER ring's own colour is fixed by ext-wd 0.0.14's
+  # draw_incident_sunburst (its incident-chip colour) and cannot be set from
+  # here; the outer ring around it carries the Fig. 8 colour family, so each
+  # type still reads in its map colour. Colouring the inner ring needs an
+  # optional colour column added to that task upstream.
   # A SUNBURST. Review: "Replace the current stacked bar chart with a sunburst
   # chart to better illustrate the relationship between cause and type of
   # death." No ecoscope-platform task draws one; ext-wd 0.0.14's
@@ -2176,17 +3668,29 @@ workflow:
     partial:
       query: |
         SELECT id,
-               COALESCE(death_type, 'Unknown') AS incident_id,
-               COALESCE(death_type, 'Unknown') AS incident,
-               COALESCE(wl_cause, 'Cause not recorded')
-                 || substr('​​​​​', 1, CASE COALESCE(death_type, 'Unknown')
+               dt AS incident_id,
+               dt || ' (' || n_type || ')' AS incident,
+               cause || ' (' || n_cause || ')'
+                 || substr('​​​​​', 1, CASE dt
                       WHEN 'Conflict' THEN 1 WHEN 'Natural' THEN 2 WHEN 'PAC/Management' THEN 3
                       WHEN 'Poached' THEN 4 ELSE 5 END) AS event_type_display,
-               CASE COALESCE(death_type, 'Unknown')
-                 WHEN 'Conflict' THEN '#b62879' WHEN 'Natural' THEN '#ff803e'
-                 WHEN 'PAC/Management' THEN '#ed3ea2' WHEN 'Poached' THEN '#3e35a3'
-                 ELSE '#3089ff' END AS type_color
-        FROM df WHERE event_type = 'animal_carcass' AND animal_h = 'Elephant' AND counted = 1
+               CASE dt
+                 WHEN 'Conflict' THEN CASE (rk - 1) % 4 WHEN 0 THEN '#b62879' WHEN 1 THEN '#cf5a9c' WHEN 2 THEN '#e28fbe' WHEN 3 THEN '#f2c4de' END
+                 WHEN 'Natural' THEN CASE (rk - 1) % 4 WHEN 0 THEN '#ff803e' WHEN 1 THEN '#ffa070' WHEN 2 THEN '#ffc0a1' WHEN 3 THEN '#ffdfd0' END
+                 WHEN 'PAC/Management' THEN CASE (rk - 1) % 4 WHEN 0 THEN '#ed3ea2' WHEN 1 THEN '#f26fb9' WHEN 2 THEN '#f7a0d0' WHEN 3 THEN '#fbd0e8' END
+                 WHEN 'Poached' THEN CASE (rk - 1) % 4 WHEN 0 THEN '#3e35a3' WHEN 1 THEN '#6c64be' WHEN 2 THEN '#9d97d6' WHEN 3 THEN '#cecbeb' END
+                 WHEN 'Unknown' THEN CASE (rk - 1) % 4 WHEN 0 THEN '#3089ff' WHEN 1 THEN '#64a6ff' WHEN 2 THEN '#98c4ff' WHEN 3 THEN '#cbe1ff' END
+               END AS type_color
+        FROM (
+          SELECT id, dt, cause,
+                 COUNT(*) OVER (PARTITION BY dt) AS n_type,
+                 COUNT(*) OVER (PARTITION BY dt, cause) AS n_cause,
+                 DENSE_RANK() OVER (PARTITION BY dt ORDER BY cause) AS rk
+          FROM (
+            SELECT id, COALESCE(death_type, 'Unknown') AS dt, COALESCE(wl_cause, 'Cause not recorded') AS cause
+            FROM df WHERE event_type = 'animal_carcass' AND animal_h = 'Elephant' AND counted = 1
+          )
+        )
       columns: null
       sanitize: true
     mapvalues:
@@ -2907,15 +4411,23 @@ workflow:
     task: merge_widget_views
     partial:
       widgets: ${{ workflow.hwc_bar_w.return }}
+  # EVERY QUALIFYING REPORT. Review 2: "The 24 incidents include one wildlife
+  # death (the October elephant conflict carcass), but Wildlife death isn't on
+  # the map legend. Please check that all 24 are plotted." They were not: this
+  # map listed the five HWC forms by name and so left out conflict carcasses,
+  # conflict injuries to wildlife and retaliatory poisoning, which the
+  # incident count includes. It now takes exactly the rows the count does
+  # (is_conflict = 1), less any without a usable location.
   - name: HWC Points
     id: hwc_points
     task: apply_sql_query
     partial:
       query: |
         SELECT geometry, event_type_display AS "Event type", type_key,
-               species_h AS "Species responsible",
+               CASE WHEN event_type IN ('animal_carcass', 'sick_injured_animal')
+                    THEN COALESCE(animal_h, 'Unknown') || ' (animal harmed)' ELSE species_h END AS "Species responsible",
                substr(report_time, 1, 16) AS "Date"
-        FROM df WHERE is_conflict = 1 AND counted = 1 AND event_type IN ('hwc_livestock_predation', 'crop_damage', 'infrastructure_damage', 'human_injury', 'human_death')
+        FROM df WHERE is_conflict = 1 AND counted = 1
           AND geometry IS NOT NULL AND geometry <> 'POINT (0 0)'
       columns: null
       sanitize: true
@@ -3311,11 +4823,18 @@ workflow:
         UNION ALL SELECT 2, 'Patrols without patrol details, since they were first recorded',
           SUM(has_patrol_info = 0 AND julianday(start_time) >= julianday((SELECT MIN(start_time) FROM df WHERE has_patrol_info = 1))),
           SUM(julianday(start_time) >= julianday((SELECT MIN(start_time) FROM df WHERE has_patrol_info = 1))) FROM df
-        UNION ALL SELECT 3, 'Patrols left open over 14h (time capped at 14h)', SUM(open_over_14h = 1), COUNT(*) FROM df
+        UNION ALL SELECT 3, 'Patrols left open over 14h (time and distance capped at 14h)', SUM(open_over_14h = 1), COUNT(*) FROM df
         UNION ALL SELECT 4, 'Patrols with no or short track (< 0.5 km)', SUM(distance_km < 0.5), COUNT(*) FROM df
       columns: null
       sanitize: true
   # SQL notes:
+  # Rows 10-12 (review 2: "Rename the sighting rows to say 'Wildlife Sighting
+  # reports' ... The two sighting rows use different totals for their %").
+  # Rows 10, 11 and 12 share one total: every Wildlife Sighting report,
+  # current form and legacy (about 747 for Jan-Nov 2026). Row 10 was a % of
+  # visual sightings until 21 Nov; with rows 11-12 on all sightings the
+  # table still showed two totals. Row 11 counts current-form reports with
+  # no type (legacy ones have no type field at all and are row 12).
   # Row 7, possible duplicates: another report of the same type with
   # IDENTICAL form contents, within 30 minutes and about 1 km (0.01
   # degrees). Type, time and place alone flagged 519 of 855 reports in the
@@ -3349,16 +4868,28 @@ workflow:
         UNION ALL SELECT 8, 'Events recorded off-patrol', SUM(COALESCE(json_array_length(patrols), 0) = 0), COUNT(*) FROM df WHERE counted = 1
         UNION ALL SELECT 9, '"Other" chosen with no notes',
           SUM(event_details LIKE '%"Other"%' AND COALESCE(json_extract(event_details, '$."Notes"'), '') = ''), COUNT(*) FROM df WHERE counted = 1
-        UNION ALL SELECT 10, 'Visual sightings with 0 individuals',
-          SUM(json_extract(event_details, '$."Sighting type"') = 'Visual' AND COALESCE(CAST(json_extract(event_details, '$."Total Individuals"') AS REAL), 0) = 0),
-          SUM(json_extract(event_details, '$."Sighting type"') = 'Visual') FROM df WHERE counted = 1 AND event_type = 'wildlife_sighting'
-        UNION ALL SELECT 11, 'Sightings with no sighting type',
-          SUM(COALESCE(json_extract(event_details, '$."Sighting type"'), '') = ''), COUNT(*) FROM df WHERE counted = 1 AND event_type = 'wildlife_sighting'
-        UNION ALL SELECT 12, 'Legacy Ranger Basic sightings never migrated (no species)',
+        UNION ALL SELECT 10, 'Visual Wildlife Sighting reports with 0 individuals',
+          SUM(event_type = 'wildlife_sighting' AND json_extract(event_details, '$."Sighting type"') = 'Visual' AND COALESCE(CAST(json_extract(event_details, '$."Total Individuals"') AS REAL), 0) = 0),
+          SUM(event_type IN ('wildlife_sighting', 'wildlife_sighting_rep_ranger'))
+          FROM df WHERE counted = 1
+        UNION ALL SELECT 11, 'Wildlife Sighting reports with no sighting type',
+          SUM(event_type = 'wildlife_sighting' AND COALESCE(json_extract(event_details, '$."Sighting type"'), '') = ''),
+          SUM(event_type IN ('wildlife_sighting', 'wildlife_sighting_rep_ranger'))
+          FROM df WHERE counted = 1
+        UNION ALL SELECT 12, 'Legacy Ranger Basic Wildlife Sighting reports never migrated',
           SUM(event_type = 'wildlife_sighting_rep_ranger'), SUM(event_type IN ('wildlife_sighting', 'wildlife_sighting_rep_ranger'))
           FROM df WHERE counted = 1
       columns: null
       sanitize: true
+  # Review 2: "The 3.3% for reports marked for deletion doesn't match any
+  # total in the report (48/839 = 5.7%)." It was taken over EVERY event
+  # fetched -- Silent Source check-ins, logistics and patrol-detail forms
+  # included. The total is now the field reports the report would count had
+  # nothing been marked: the same exclusions as `counted` in Prepare Events,
+  # with the marked reports put back in. An old report and its migrated copy
+  # are one report here, as everywhere else: the 3 Livestock Theft originals
+  # marked for deletion were counted alongside their 3 Theft copies before,
+  # which made 48; it is 45 reports (42 HWC Threat + 3 Theft), of 836.
   - name: Records Marked for Deletion
     id: deleted_checks
     task: apply_sql_query
@@ -3368,11 +4899,21 @@ workflow:
       df: ${{ workflow.events_safe.return }}
       query: |
         SELECT 13 AS ord, 'Reports marked for deletion (left out of this report)' AS "Check",
-               COALESCE(SUM(LOWER(COALESCE(title, '')) LIKE '%delet%'
-                 OR json_extract(event_details, '$."additional"."migrated_from_event_id"')
-                    IN (SELECT id FROM df WHERE LOWER(COALESCE(title, '')) LIKE '%delet%')), 0) AS "Count",
+               COALESCE(SUM(del), 0) AS "Count",
                COUNT(*) AS total
-        FROM df WHERE event_category <> 'analyzer_event'
+        FROM (
+          SELECT CASE WHEN LOWER(COALESCE(title, '')) LIKE '%delet%'
+                        OR json_extract(event_details, '$."additional"."migrated_from_event_id"')
+                           IN (SELECT id FROM df WHERE LOWER(COALESCE(title, '')) LIKE '%delet%')
+                      THEN 1 ELSE 0 END AS del
+          FROM df
+          WHERE COALESCE(event_category, '') NOT IN ('logistics', 'analyzer_event', 'test')
+            AND event_type NOT IN ('test_patrol_info', 'patrol_info', 'meeting_rep', 'meeting_report',
+                                   'rangeland_meeting_rep', 'livestock_household_survey',
+                                   'livestock_survey_quest', 'silence_source_rep')
+            AND id NOT IN (SELECT json_extract(event_details, '$."additional"."migrated_from_event_id"') FROM df
+                           WHERE json_extract(event_details, '$."additional"."migrated_from_event_id"') IS NOT NULL)
+        )
       columns: null
       sanitize: true
   - name: Combine Data Checks
@@ -3554,11 +5095,14 @@ workflow:
           )
         ) mon
         CROSS JOIN (SELECT 'Joint Operations Mobile Patrol' AS "Patrol type" UNION ALL SELECT 'Motorbike Patrol'
-                    UNION ALL SELECT 'Other' UNION ALL SELECT 'Routine Patrol') ty
+                    UNION ALL SELECT 'Routine Patrol'
+                    UNION ALL SELECT '​Other patrol types' WHERE EXISTS (
+                      SELECT 1 FROM df WHERE COALESCE(distance_km, 0) > 0
+                        AND patrol_type NOT IN ('Routine Patrol', 'Motorbike Patrol', 'Joint Operations Mobile Patrol'))) ty
         LEFT JOIN (
           SELECT substr(start_time, 1, 7) AS mth,
                  CASE WHEN patrol_type IN ('Routine Patrol', 'Motorbike Patrol', 'Joint Operations Mobile Patrol')
-                      THEN patrol_type ELSE 'Other' END AS pt,
+                      THEN patrol_type ELSE '​Other patrol types' END AS pt,
                  ROUND(SUM(COALESCE(distance_km, 0)), 2) AS km
           FROM df GROUP BY 1, 2
         ) d ON d.mth = mon.ym AND d.pt = ty."Patrol type"
@@ -3578,7 +5122,15 @@ workflow:
       category: Patrol type
       time_breakdown: null
       barmode: stack
-      palette: ['#7570b3', '#d95f02', '#8a8f98', '#1b9e77']
+      # Joint Operations, Motorbike, Routine, then "Other patrol types" -- which
+      # is only a series when a patrol of another type exists. Review 2: "there's
+      # an 'Other' patrol type in fig 1 that isn't on the map legend / map. What
+      # does it cover and why is it missing?" It covered every type other than
+      # the three, and it was always listed (at zero) to keep the colours
+      # fixed; no other type was patrolled, so the map had nothing to draw.
+      # It now sorts last (a leading zero-width space), so the three fixed
+      # colours do not move when it is absent, and it is absent unless used.
+      palette: ['#7570b3', '#d95f02', '#1b9e77', '#8a8f98']
       plot_style: null
       layout_style:
         showlegend: true
@@ -3772,6 +5324,9 @@ workflow:
                    WHEN 'peter_kermui' THEN 'Peter Kermui'
                    WHEN 'robert_karkuli' THEN 'Robert Karkuli'
                    WHEN 'samuel_leshao' THEN 'Samuel Leshao'
+                   WHEN 'samuel_leshay' THEN 'Samuel Leshao'
+                   WHEN 'samuel_meshanu' THEN 'Samuel Meshami'
+                   WHEN 'tony_lekerisat' THEN 'Tony Lekerisae'
                    WHEN 'samuel_meshami' THEN 'Samuel Meshami'
                    WHEN 'silamo_siangau' THEN 'Silamo Siangau'
                    WHEN 'simpiri_alex' THEN 'Simpiri Alex'
@@ -4229,6 +5784,36 @@ workflow:
           max_concurrent_pages: 2
           device_scale_factor: 1.0
           timeout: 120000
+      - item_type: table
+        key: coverage_cards
+        value: ${{ workflow.coverage_cards.return }}
+      - item_type: image
+        key: coverage_map
+        value: ${{ workflow.coverage_map_html.return }}
+        width_inches: 4.9
+        screenshot_config:
+          wait_for_timeout: 15000
+          max_concurrent_pages: 2
+          device_scale_factor: 1.0
+          timeout: 120000
+      - item_type: image
+        key: wl_encounter_map
+        value: ${{ workflow.wl_er_map_html.return }}
+        width_inches: 4.9
+        screenshot_config:
+          wait_for_timeout: 15000
+          max_concurrent_pages: 2
+          device_scale_factor: 1.0
+          timeout: 120000
+      - item_type: image
+        key: ia_encounter_map
+        value: ${{ workflow.ia_er_map_html.return }}
+        width_inches: 4.9
+        screenshot_config:
+          wait_for_timeout: 15000
+          max_concurrent_pages: 2
+          device_scale_factor: 1.0
+          timeout: 120000
       - item_type: image
         key: event_type_pies
         value: ${{ workflow.event_type_pie_html.return }}
@@ -4248,14 +5833,65 @@ workflow:
           device_scale_factor: 1.0
           timeout: 120000
       - item_type: image
-        key: priority_maps
-        value: ${{ workflow.priority_map_html.return }}
+        key: ps1_maps
+        value: ${{ workflow.ps1_map_html.return }}
         width_inches: 4.9
         screenshot_config:
           wait_for_timeout: 15000
           max_concurrent_pages: 2
           device_scale_factor: 1.0
           timeout: 120000
+      - item_type: text
+        key: ps1_name
+        value: ${{ workflow.ps1_name.return }}
+      - item_type: image
+        key: ps2_maps
+        value: ${{ workflow.ps2_map_html.return }}
+        width_inches: 4.9
+        screenshot_config:
+          wait_for_timeout: 15000
+          max_concurrent_pages: 2
+          device_scale_factor: 1.0
+          timeout: 120000
+      - item_type: text
+        key: ps2_name
+        value: ${{ workflow.ps2_name.return }}
+      - item_type: image
+        key: ps3_maps
+        value: ${{ workflow.ps3_map_html.return }}
+        width_inches: 4.9
+        screenshot_config:
+          wait_for_timeout: 15000
+          max_concurrent_pages: 2
+          device_scale_factor: 1.0
+          timeout: 120000
+      - item_type: text
+        key: ps3_name
+        value: ${{ workflow.ps3_name.return }}
+      - item_type: image
+        key: ps4_maps
+        value: ${{ workflow.ps4_map_html.return }}
+        width_inches: 4.9
+        screenshot_config:
+          wait_for_timeout: 15000
+          max_concurrent_pages: 2
+          device_scale_factor: 1.0
+          timeout: 120000
+      - item_type: text
+        key: ps4_name
+        value: ${{ workflow.ps4_name.return }}
+      - item_type: image
+        key: ps5_maps
+        value: ${{ workflow.ps5_map_html.return }}
+        width_inches: 4.9
+        screenshot_config:
+          wait_for_timeout: 15000
+          max_concurrent_pages: 2
+          device_scale_factor: 1.0
+          timeout: 120000
+      - item_type: text
+        key: ps5_name
+        value: ${{ workflow.ps5_name.return }}
       - item_type: image
         key: ah_maps
         value: ${{ workflow.ah_map_html.return }}
@@ -4485,11 +6121,15 @@ workflow:
     - ${{ workflow.transport_tbl_wm.return }}
     - ${{ workflow.mandate_tbl_wm.return }}
     - ${{ workflow.ranger_tbl_wm.return }}
+    - ${{ workflow.coverage_sv.return }}
+    - ${{ workflow.coverage_map_w.return }}
+    - ${{ workflow.wl_er_map_w.return }}
+    - ${{ workflow.ia_er_map_w.return }}
     - ${{ workflow.event_kpi_0_svw.return }}
     - ${{ workflow.event_type_pie_wm.return }}
     - ${{ workflow.wildlife_tbl_wm.return }}
     - ${{ workflow.wildlife_map_wm.return }}
-    - ${{ workflow.priority_map_wm.return }}
+    - ${{ workflow.psall_map_wm.return }}
     - ${{ workflow.ah_kpi_0_svw.return }}
     - ${{ workflow.ah_kpi_1_svw.return }}
     - ${{ workflow.ah_cause_tbl_wm.return }}
